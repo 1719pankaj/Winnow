@@ -1,0 +1,35 @@
+{
+  "name": "winnow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "phase0": "tsx scripts/phase0_test.ts"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "@mozilla/readability": "^0.6.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.7",
+    "js-yaml": "^5.3.0",
+    "linkedom": "^0.18.13",
+    "next": "^16.3.2",
+    "openai": "^4.85.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "uuid": "^14.0.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

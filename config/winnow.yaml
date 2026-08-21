@@ -1,0 +1,68 @@
+tiers:
+  fast:
+    providers: [serper]
+    retrieve_count: 15
+    prefilter_keep: 10
+    fetch_enabled: false
+    fetch_max: 0
+    rerank_mode: listwise
+    allow_tool_loop: false
+    deadline_ms: 10000
+  right:
+    providers: [serper, tavily]
+    retrieve_count: 24
+    prefilter_keep: 14
+    fetch_enabled: true
+    fetch_max: 10
+    fetch_chars_per_page: 6000
+    rerank_mode: listwise
+    allow_tool_loop: false
+    tool_loop_max_rounds: 2
+    deadline_ms: 30000
+
+stage_budgets_ms:
+  plan: 4000
+  retrieve: 7000
+  prefilter: 4000
+  fetch: 12000
+  rerank: 20000
+
+blocklist:
+  hard:
+    - "*.pinterest.*"
+    - "*.pinimg.com"
+    - "answers.yahoo.com"
+  soft:
+    - "medium.com"
+    - "*.blogspot.com"
+    - "*.wordpress.com"
+    - "quora.com"
+  soft_penalty: 15
+  score_threshold: 25
+  max_results: 10
+  max_per_domain: 3
+
+fusion:
+  rrf_k: 60
+
+prefilter:
+  weight_embedding: 0.7
+  weight_fused: 0.3
+  intent_truncate_tokens: 300
+
+fetch:
+  user_agent: "Winnow/1.0 (personal research tool)"
+  respect_robots: true
+  per_page_timeout_ms: 5000
+  max_bytes: 2500000
+  max_redirects: 3
+  allow_pdf: true
+  global_concurrency: 6
+
+cache:
+  page_ttl_hours: 72
+  search_ttl_minutes: 30
+  embedding_ttl_days: 30
+
+deadline:
+  skip_to_rerank_at_remaining_pct: 20

@@ -1,0 +1,116 @@
+providers:
+  - name: serper
+    enabled: true
+    weight: 1.0
+    request:
+      method: POST
+      url: https://google.serper.dev/search
+      auth:
+        style: header
+        name: X-API-KEY
+        value: ${SERPER_KEY}
+      params:
+        query: q
+        count: num
+      static_params:
+        gl: us
+        hl: en
+      headers:
+        Content-Type: application/json
+      timeout_ms: 7000
+    response:
+      results_path: organic
+      fields:
+        title: title
+        snippet: snippet
+        url: link
+        published_at: date
+        site_name: null
+      total_path: searchParameters.num
+    limits:
+      max_count: 20
+      rpm: 60
+      rpd: 2500
+      concurrent: 4
+    capabilities:
+      freshness_filter: false
+      site_filter: true
+      pagination: true
+    on_error: skip
+
+  - name: tavily
+    enabled: true
+    weight: 0.9
+    request:
+      method: POST
+      url: https://api.tavily.com/search
+      auth:
+        style: body
+        name: api_key
+        value: ${TRAVITY_KEY}
+      params:
+        query: query
+        count: max_results
+      static_params:
+        search_depth: basic
+        include_answer: false
+      headers:
+        Content-Type: application/json
+      timeout_ms: 8000
+    response:
+      results_path: results
+      fields:
+        title: title
+        snippet: content
+        url: url
+        published_at: published_date
+        site_name: null
+      total_path: null
+    limits:
+      max_count: 20
+      rpm: 30
+      rpd: 1000
+      concurrent: 3
+    capabilities:
+      freshness_filter: false
+      site_filter: true
+      pagination: false
+    on_error: skip
+
+  - name: serpapi
+    enabled: false
+    weight: 0.8
+    request:
+      method: GET
+      url: https://serpapi.com/search.json
+      auth:
+        style: query
+        name: api_key
+        value: ${SERPAPI_KEY}
+      params:
+        query: q
+        count: num
+      static_params:
+        engine: google
+      headers:
+        Accept: application/json
+      timeout_ms: 10000
+    response:
+      results_path: organic_results
+      fields:
+        title: title
+        snippet: snippet
+        url: link
+        published_at: date
+        site_name: source
+      total_path: search_information.total_results
+    limits:
+      max_count: 20
+      rpm: 20
+      rpd: 100
+      concurrent: 2
+    capabilities:
+      freshness_filter: false
+      site_filter: true
+      pagination: true
+    on_error: skip

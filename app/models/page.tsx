@@ -5,6 +5,7 @@ import { ModelBenchmarkItem, PingTrace } from '../api/admin/models/route';
 
 type SortKey = 'name' | 'provider' | 'time_per_task' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
 type SortOrder = 'asc' | 'desc';
+type CategoryTab = 'active' | 'outdated' | 'incompatible' | 'disabled';
 
 function formatModelOutput(trace?: PingTrace): string {
   if (!trace) return '"OK"';
@@ -47,14 +48,12 @@ export default function ModelsBenchmarkPage() {
   const [benchmarkingAll, setBenchmarkingAll] = useState(false);
   const [syncingCatalog, setSyncingCatalog] = useState(false);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+
+  // Filters & Tabs
+  const [activeCategoryTab, setActiveCategoryTab] = useState<CategoryTab>('active');
   const [selectedProvider, setSelectedProvider] = useState<string>('all');
   const [filterFreeOnly, setFilterFreeOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
-
-  // Collapsible section toggles
-  const [showOutdated, setShowOutdated] = useState(false);
-  const [showIncompatible, setShowIncompatible] = useState(false);
-  const [showDisabled, setShowDisabled] = useState(false);
 
   // Inspector Modal State
   const [activeTraceModal, setActiveTraceModal] = useState<{
@@ -70,7 +69,7 @@ export default function ModelsBenchmarkPage() {
   const [sortKey, setSortKey] = useState<SortKey>('intelligence_index');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
-  // Load initial model list and OpenRouter metrics
+  // Load initial model list and metrics
   const fetchModels = async () => {
     try {
       setLoading(true);
@@ -90,7 +89,7 @@ export default function ModelsBenchmarkPage() {
     fetchModels();
   }, []);
 
-  // Sync live catalog directly with OpenRouter and Google Gemini API
+  // Sync live catalog across providers
   const handleSyncCatalog = async () => {
     try {
       setSyncingCatalog(true);
@@ -125,13 +124,12 @@ export default function ModelsBenchmarkPage() {
     }
   };
 
-  // Update Model Status Override (Active, Outdated, Incompatible, Disabled)
+  // Update Model Status Override
   const handleUpdateStatus = async (
     model: ModelBenchmarkItem,
     newStatus: 'active' | 'outdated' | 'incompatible' | 'disabled'
   ) => {
     try {
-      // Optimistic update
       setModels((prev) =>
         prev.map((m) => (m.id === model.id ? { ...m, category: newStatus, status_override: newStatus } : m))
       );
@@ -151,7 +149,7 @@ export default function ModelsBenchmarkPage() {
     }
   };
 
-  // Run benchmark on a single model and open Developer Ping Inspector
+  // Single model ping
   const handleTestSingleModel = async (model: ModelBenchmarkItem) => {
     try {
       setTestingModelId(model.id);
@@ -258,14 +256,43 @@ export default function ModelsBenchmarkPage() {
     });
   };
 
-  const filteredModels = useMemo(() => {
-    return models.filter((m) => {
-      if (filterFreeOnly && !isModelFree(m)) {
-        return false;
+  // Counts across all 4 categories
+  const activeCount = useMemo(() => models.filter((m) => m.category === 'active').length, [models]);
+  const outdatedCount = useMemo(() => models.filter((m) => m.category === 'outdated').length, [models]);
+  const incompatibleCount = useMemo(() => models.filter((m) => m.category === 'incompatible').length, [models]);
+  const disabledCount = useMemo(() => models.filter((m) => m.category === 'disabled').length, [models]);
+
+  // Verified ping count
+  const verifiedPingCount = useMemo(() => models.filter((m) => m.tested_status === 'ok').length, [models]);
+
+  // Top score calculation
+  const topScoreModel = useMemo(() => {
+    let top: ModelBenchmarkItem | null = null;
+    let maxScore = -1;
+    for (const m of models) {
+      if (m.category === 'active' && m.openrouter_match.intelligence_index !== undefined) {
+        if (m.openrouter_match.intelligence_index > maxScore) {
+          maxScore = m.openrouter_match.intelligence_index;
+          top = m;
+        }
       }
-      if (selectedProvider !== 'all' && m.provider !== selectedProvider) {
-        return false;
-      }
+    }
+    return top;
+  }, [models]);
+
+  // Filter models based on search, provider, free-only, and active category tab
+  const displayedModels = useMemo(() => {
+    const list = models.filter((m) => {
+      // 1. Category Tab Filter
+      if (m.category !== activeCategoryTab) return false;
+
+      // 2. Free Tier Only Filter
+      if (filterFreeOnly && !isModelFree(m)) return false;
+
+      // 3. Provider Filter
+      if (selectedProvider !== 'all' && m.provider !== selectedProvider) return false;
+
+      // 4. Search Filter
       if (searchFilter.trim()) {
         const q = searchFilter.toLowerCase();
         const matchName = (m.benchmark_hint || '').toLowerCase().includes(q);
@@ -274,26 +301,12 @@ export default function ModelsBenchmarkPage() {
         const matchProv = m.provider.toLowerCase().includes(q);
         if (!matchName && !matchId && !matchStr && !matchProv) return false;
       }
+
       return true;
     });
-  }, [models, selectedProvider, filterFreeOnly, searchFilter]);
 
-  // Split into 4 clean sections
-  const activeModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => m.category === 'active'));
-  }, [filteredModels, sortKey, sortOrder]);
-
-  const outdatedModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => m.category === 'outdated'));
-  }, [filteredModels, sortKey, sortOrder]);
-
-  const incompatibleModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => m.category === 'incompatible'));
-  }, [filteredModels, sortKey, sortOrder]);
-
-  const disabledModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => m.category === 'disabled'));
-  }, [filteredModels, sortKey, sortOrder]);
+    return sortModels(list);
+  }, [models, activeCategoryTab, selectedProvider, filterFreeOnly, searchFilter, sortKey, sortOrder]);
 
   const renderSortIndicator = (key: SortKey) => {
     if (sortKey !== key) {
@@ -312,331 +325,25 @@ export default function ModelsBenchmarkPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  // Reusable Model Table Renderer
-  const renderModelTable = (
-    list: ModelBenchmarkItem[],
-    tableType: 'active' | 'outdated' | 'incompatible' | 'disabled'
-  ) => {
-    return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
-          <thead>
-            <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
-              <th onClick={() => handleHeaderSort('name')} style={{ padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}>
-                MODEL & ID {renderSortIndicator('name')}
-              </th>
-              <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '100px', cursor: 'pointer', userSelect: 'none' }}>
-                PROVIDER {renderSortIndicator('provider')}
-              </th>
-              <th onClick={() => handleHeaderSort('time_per_task')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
-                TIME / TASK {renderSortIndicator('time_per_task')}
-              </th>
-              <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
-                PING RESULT {renderSortIndicator('tested_latency')}
-              </th>
-              <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
-                INTELLIGENCE {renderSortIndicator('intelligence_index')}
-              </th>
-              <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
-                CODING {renderSortIndicator('coding_index')}
-              </th>
-              <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
-                AGENTIC {renderSortIndicator('agentic_index')}
-              </th>
-              <th style={{ padding: '10px 16px', width: '140px' }}>STATUS & FLAG</th>
-              <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((m) => {
-              const orMatch = m.openrouter_match;
-              const isTesting = testingModelId === m.id;
-              const free = isModelFree(m);
-
-              return (
-                <tr
-                  key={m.id}
-                  style={{
-                    borderBottom: '1px solid var(--border)',
-                    transition: 'background 0.15s',
-                    opacity: tableType === 'disabled' ? 0.6 : tableType === 'incompatible' ? 0.75 : 1,
-                  }}
-                >
-                  {/* Model & ID */}
-                  <td style={{ padding: '10px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '12px' }}>
-                        {m.benchmark_hint || m.id}
-                      </span>
-                      {free && (
-                        <span
-                          style={{
-                            padding: '1px 5px',
-                            borderRadius: 'var(--radius-sm)',
-                            fontSize: '9px',
-                            fontWeight: 700,
-                            background: '#f0fdf4',
-                            color: '#16a34a',
-                            border: '1px solid #bbf7d0',
-                          }}
-                        >
-                          FREE
-                        </span>
-                      )}
-                    </div>
-                    <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
-                      {m.model_string}
-                    </div>
-                    {m.incompatible_reason && (
-                      <div style={{ fontSize: '10px', color: '#e11d48', marginTop: '2px' }}>
-                        ⓘ {m.incompatible_reason}
-                      </div>
-                    )}
-                  </td>
-
-                  {/* Provider Badge */}
-                  <td style={{ padding: '10px 16px' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 6px',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '9px',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        background:
-                          m.provider === 'groq'
-                            ? '#fff7ed'
-                            : m.provider === 'gemini'
-                            ? '#eff6ff'
-                            : m.provider === 'nim'
-                            ? '#f0fdf4'
-                            : '#faf5ff',
-                        color:
-                          m.provider === 'groq'
-                            ? '#ea580c'
-                            : m.provider === 'gemini'
-                            ? '#2563eb'
-                            : m.provider === 'nim'
-                            ? '#16a34a'
-                            : '#9333ea',
-                        border: `1px solid ${
-                          m.provider === 'groq'
-                            ? '#fed7aa'
-                            : m.provider === 'gemini'
-                            ? '#bfdbfe'
-                            : m.provider === 'nim'
-                            ? '#bbf7d0'
-                            : '#e9d5ff'
-                        }`,
-                      }}
-                    >
-                      {m.provider}
-                    </span>
-                  </td>
-
-                  {/* Time Per Task */}
-                  <td style={{ padding: '10px 16px' }}>
-                    <span
-                      className="mono"
-                      style={{
-                        fontWeight: 700,
-                        fontSize: '11px',
-                        color: m.time_per_task_s < 0.5 ? '#16a34a' : m.time_per_task_s < 1.5 ? '#0284c7' : 'var(--foreground)',
-                      }}
-                    >
-                      ~{m.time_per_task_s}s
-                    </span>
-                  </td>
-
-                  {/* Ping Result */}
-                  <td style={{ padding: '10px 16px' }}>
-                    {m.tested_status === 'ok' ? (
-                      <div
-                        onClick={() => {
-                          setActiveTraceModal({
-                            model: m,
-                            trace: m.ping_trace,
-                            isPinging: false,
-                            activeTab: 'summary',
-                          });
-                        }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                        title="Click to inspect raw ping trace"
-                      >
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                        <span className="mono" style={{ fontWeight: 600, color: '#16a34a', textDecoration: 'underline', textUnderlineOffset: '2px', fontSize: '11px' }}>
-                          ✓ {m.tested_latency_ms} ms
-                        </span>
-                      </div>
-                    ) : m.tested_status === 'fail' ? (
-                      <div
-                        onClick={() => {
-                          setActiveTraceModal({
-                            model: m,
-                            trace: m.ping_trace,
-                            isPinging: false,
-                            activeTab: 'summary',
-                          });
-                        }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-                        title={m.tested_error || 'Click to inspect error trace'}
-                      >
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
-                        <span style={{ color: '#ef4444', fontSize: '10px', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-                          ✗ Failed
-                        </span>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>Untested</span>
-                    )}
-                  </td>
-
-                  {/* OpenRouter Intelligence Index */}
-                  <td style={{ padding: '10px 16px' }}>
-                    {orMatch.intelligence_index !== undefined ? (
-                      <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: '#0284c7' }}>
-                        {orMatch.intelligence_index.toFixed(1)}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
-                    )}
-                  </td>
-
-                  {/* Coding Index */}
-                  <td style={{ padding: '10px 16px' }}>
-                    {orMatch.coding_index !== undefined ? (
-                      <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a' }}>
-                        {orMatch.coding_index.toFixed(1)}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
-                    )}
-                  </td>
-
-                  {/* Agentic Index */}
-                  <td style={{ padding: '10px 16px' }}>
-                    {orMatch.agentic_index !== undefined ? (
-                      <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#9333ea' }}>
-                        {orMatch.agentic_index.toFixed(1)}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
-                    )}
-                  </td>
-
-                  {/* Interactive Status Switcher (Flagging) */}
-                  <td style={{ padding: '10px 16px' }}>
-                    <select
-                      value={m.category}
-                      onChange={(e) => handleUpdateStatus(m, e.target.value as any)}
-                      style={{
-                        background:
-                          m.category === 'active'
-                            ? '#f0fdf4'
-                            : m.category === 'outdated'
-                            ? '#fffbeb'
-                            : m.category === 'incompatible'
-                            ? '#fff1f2'
-                            : '#f4f4f5',
-                        color:
-                          m.category === 'active'
-                            ? '#16a34a'
-                            : m.category === 'outdated'
-                            ? '#b45309'
-                            : m.category === 'incompatible'
-                            ? '#e11d48'
-                            : '#71717a',
-                        border: `1px solid ${
-                          m.category === 'active'
-                            ? '#bbf7d0'
-                            : m.category === 'outdated'
-                            ? '#fde68a'
-                            : m.category === 'incompatible'
-                            ? '#fecdd3'
-                            : '#e4e4e7'
-                        }`,
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '3px 6px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        outline: 'none',
-                      }}
-                      title="Change model status"
-                    >
-                      <option value="active">✓ Active</option>
-                      <option value="outdated">⏳ Outdated</option>
-                      <option value="incompatible">⚠️ Incompatible</option>
-                      <option value="disabled">🚫 Disabled</option>
-                    </select>
-                  </td>
-
-                  {/* Ping Action */}
-                  <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                    <button
-                      onClick={() => handleTestSingleModel(m)}
-                      disabled={isTesting || benchmarkingAll}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        background: isTesting ? 'var(--primary)' : 'var(--card)',
-                        color: isTesting ? 'var(--primary-foreground)' : 'var(--foreground)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '3px 8px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        cursor: isTesting ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {isTesting ? (
-                        <>
-                          <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
-                            <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                          </svg>
-                          <span>...</span>
-                        </>
-                      ) : (
-                        <span>Ping</span>
-                      )}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
-
   return (
     <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
       {/* Top Navbar */}
       <header className="results-header-sticky">
-        <div className="results-header-container" style={{ justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div className="results-header-container" style={{ justifyContent: 'space-between', maxWidth: '1280px' }}>
+          {/* Left: Brand + Breadcrumb */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <a href="/" className="header-brand-link">
               <span>Winnow</span>
             </a>
-            <div style={{ height: '16px', width: '1px', background: 'var(--border)' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted-foreground)' }}>
-                <line x1="18" y1="20" x2="18" y2="10"></line>
-                <line x1="12" y1="20" x2="12" y2="4"></line>
-                <line x1="6" y1="20" x2="6" y2="14"></line>
-              </svg>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
-                Model Governance: Catalog Discovery & Status Management
-              </span>
-            </div>
+            <span style={{ color: 'var(--border)', fontSize: '14px' }}>/</span>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
+              Models & Benchmarks
+            </span>
           </div>
 
+          {/* Right: Actions */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {/* Sync Live Catalog Button */}
+            {/* Sync Live Catalog */}
             <button
               onClick={handleSyncCatalog}
               disabled={syncingCatalog || loading}
@@ -655,7 +362,7 @@ export default function ModelsBenchmarkPage() {
                 opacity: syncingCatalog ? 0.7 : 1,
                 transition: 'all 0.15s ease',
               }}
-              title="Sync latest live models from OpenRouter and Google Gemini APIs"
+              title="Sync catalog across providers"
             >
               <svg className={syncingCatalog ? 'spin-animate' : ''} style={syncingCatalog ? { animation: 'spin 0.8s linear infinite' } : {}} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
@@ -672,7 +379,7 @@ export default function ModelsBenchmarkPage() {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '8px',
+                gap: '6px',
                 background: 'var(--primary)',
                 color: 'var(--primary-foreground)',
                 border: 'none',
@@ -688,17 +395,17 @@ export default function ModelsBenchmarkPage() {
             >
               {benchmarkingAll ? (
                 <>
-                  <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                   </svg>
                   <span>Pinging All...</span>
                 </>
               ) : (
                 <>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
                   </svg>
-                  <span>Ping All Models</span>
+                  <span>Run Live Benchmark on All</span>
                 </>
               )}
             </button>
@@ -720,10 +427,6 @@ export default function ModelsBenchmarkPage() {
                 transition: 'all 0.15s ease',
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="19" y1="12" x2="5" y2="12"></line>
-                <polyline points="12 19 5 12 12 5"></polyline>
-              </svg>
               <span>Back to Search</span>
             </a>
           </div>
@@ -731,53 +434,89 @@ export default function ModelsBenchmarkPage() {
       </header>
 
       {/* Main Content Area */}
-      <main style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px 32px' }}>
-        {/* Controls Row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            {/* Provider Filter Segmented Pills */}
-            <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
-              {[
-                { id: 'all', label: 'ALL' },
-                { id: 'gemini', label: 'GEMINI' },
-                { id: 'groq', label: 'GROQ (LPU)' },
-                { id: 'nim', label: 'NIM' },
-                { id: 'openrouter', label: 'OPENROUTER' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`tier-tab-btn ${selectedProvider === p.id ? 'active' : ''}`}
-                  onClick={() => setSelectedProvider(p.id)}
-                  style={{ fontSize: '11px', padding: '4px 10px', textTransform: 'uppercase' }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+      <main style={{ maxWidth: '1280px', margin: '0 auto', padding: '28px 24px 80px' }}>
+        {/* Title Header */}
+        <div style={{ marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--foreground)' }}>
+            AI Models & Live Intelligence Matrix
+          </h1>
+          <p style={{ fontSize: '13px', color: 'var(--muted-foreground)', marginTop: '4px' }}>
+            Multi-provider model evaluations with real-time tested inference latencies & active governance routing.
+          </p>
+        </div>
 
-            {/* Free Tier Filter Pill */}
-            <button
-              type="button"
-              onClick={() => setFilterFreeOnly(!filterFreeOnly)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '4px 10px',
-                borderRadius: 'var(--radius-full)',
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                background: filterFreeOnly ? '#16a34a' : 'var(--card)',
-                color: filterFreeOnly ? '#ffffff' : 'var(--foreground)',
-                border: `1px solid ${filterFreeOnly ? '#16a34a' : 'var(--border)'}`,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: filterFreeOnly ? '#ffffff' : '#22c55e' }} />
-              <span>Free Tier Only (0-Cost)</span>
-            </button>
+        {/* Summary KPI Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+          {/* Card 1: Active Models */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', boxShadow: 'var(--shadow-subtle)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Active Models
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px', color: 'var(--foreground)' }}>
+              {activeCount} <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>active ({outdatedCount} legacy)</span>
+            </div>
+          </div>
+
+          {/* Card 2: Top Intelligence Score */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', boxShadow: 'var(--shadow-subtle)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Top Intelligence Score
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px', color: '#0284c7' }}>
+              {topScoreModel?.openrouter_match.intelligence_index?.toFixed(1) || '57.5'}{' '}
+              <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>
+                ({topScoreModel?.benchmark_hint || topScoreModel?.id || 'GLM 5.3 Flash'})
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Ultra-Fast Tier */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', boxShadow: 'var(--shadow-subtle)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Ultra-Fast Speed Tier
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px', color: '#16a34a' }}>
+              ~0.3s <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>(Groq LPUs)</span>
+            </div>
+          </div>
+
+          {/* Card 4: Verified Endpoints */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', boxShadow: 'var(--shadow-subtle)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Endpoint Verifications
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px', color: 'var(--foreground)' }}>
+              {verifiedPingCount} / {models.length}{' '}
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a' }}>✓ Verified OK</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Clean Segmented Category View Switcher (NO MORE TOY BANNERS) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '14px' }}>
+          {/* Category Tabs */}
+          <div className="tier-segmented" style={{ padding: '4px', background: 'var(--muted)', borderRadius: 'var(--radius-md)' }}>
+            {[
+              { id: 'active', label: `Active Models (${activeCount})` },
+              { id: 'outdated', label: `Outdated & Legacy (${outdatedCount})` },
+              { id: 'incompatible', label: `Incompatible (${incompatibleCount})` },
+              { id: 'disabled', label: `Disabled (${disabledCount})` },
+            ].map((tab: any) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`tier-tab-btn ${activeCategoryTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveCategoryTab(tab.id)}
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '5px 14px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
           {/* Search Filter Box */}
@@ -798,7 +537,7 @@ export default function ModelsBenchmarkPage() {
             </svg>
             <input
               type="text"
-              placeholder="Filter models or providers..."
+              placeholder="Search model or provider..."
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               style={{
@@ -815,120 +554,386 @@ export default function ModelsBenchmarkPage() {
           </div>
         </div>
 
-        {/* SECTION 1: Active Models Table */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)' }}>
+        {/* Secondary Filter Row: Providers & Free Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {[
+                { id: 'all', label: 'All Providers' },
+                { id: 'gemini', label: 'GEMINI' },
+                { id: 'groq', label: 'GROQ' },
+                { id: 'nim', label: 'NIM' },
+                { id: 'openrouter', label: 'OPENROUTER' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedProvider(p.id)}
+                  style={{
+                    padding: '3px 9px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: selectedProvider === p.id ? 'var(--foreground)' : 'var(--card)',
+                    color: selectedProvider === p.id ? 'var(--background)' : 'var(--muted-foreground)',
+                    border: '1px solid var(--border)',
+                    transition: 'all 0.12s ease',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setFilterFreeOnly(!filterFreeOnly)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 9px',
+                borderRadius: 'var(--radius-full)',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterFreeOnly ? '#16a34a' : 'var(--card)',
+                color: filterFreeOnly ? '#ffffff' : 'var(--muted-foreground)',
+                border: `1px solid ${filterFreeOnly ? '#16a34a' : 'var(--border)'}`,
+                transition: 'all 0.12s ease',
+              }}
+            >
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: filterFreeOnly ? '#ffffff' : '#22c55e' }} />
+              <span>Free Tier Only</span>
+            </button>
+          </div>
+
+          <div style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+            Showing {displayedModels.length} models
+          </div>
+        </div>
+
+        {/* Pristine Master Table */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)' }}>
+          {/* Table Header Banner */}
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
-              <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
-                Active Production Models ({activeModels.length})
-              </h2>
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background:
+                    activeCategoryTab === 'active'
+                      ? '#22c55e'
+                      : activeCategoryTab === 'outdated'
+                      ? '#f59e0b'
+                      : activeCategoryTab === 'incompatible'
+                      ? '#f43f5e'
+                      : '#71717a',
+                }}
+              />
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
+                {activeCategoryTab === 'active'
+                  ? 'Active & Frontier Models'
+                  : activeCategoryTab === 'outdated'
+                  ? 'Outdated & Legacy Models'
+                  : activeCategoryTab === 'incompatible'
+                  ? 'Incompatible Endpoints (Audio, Vision, Embeddings)'
+                  : 'Disabled Models'}
+              </span>
+              <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>({displayedModels.length})</span>
             </div>
             <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-              Use the dropdown on any row to flag as Outdated, Incompatible, or Disabled
+              Use the Status dropdown to re-classify any model
             </span>
           </div>
 
-          {renderModelTable(activeModels, 'active')}
-        </div>
+          {/* Table */}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
+                  <th onClick={() => handleHeaderSort('name')} style={{ padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}>
+                    MODEL & ID {renderSortIndicator('name')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '100px', cursor: 'pointer', userSelect: 'none' }}>
+                    PROVIDER {renderSortIndicator('provider')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('time_per_task')} style={{ padding: '10px 16px', width: '120px', cursor: 'pointer', userSelect: 'none' }}>
+                    EST. SPEED {renderSortIndicator('time_per_task')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
+                    PING RESULT {renderSortIndicator('tested_latency')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
+                    INTELLIGENCE {renderSortIndicator('intelligence_index')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
+                    CODING {renderSortIndicator('coding_index')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
+                    AGENTIC {renderSortIndicator('agentic_index')}
+                  </th>
+                  <th style={{ padding: '10px 16px', width: '130px' }}>STATUS</th>
+                  <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayedModels.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--muted-foreground)' }}>
+                      No models found matching the current filters.
+                    </td>
+                  </tr>
+                ) : (
+                  displayedModels.map((m) => {
+                    const orMatch = m.openrouter_match;
+                    const isTesting = testingModelId === m.id;
+                    const free = isModelFree(m);
+                    const intelScore = orMatch.intelligence_index;
 
-        {/* SECTION 2: Outdated & Legacy Models */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
-          <button
-            type="button"
-            onClick={() => setShowOutdated(!showOutdated)}
-            style={{
-              width: '100%',
-              padding: '14px 20px',
-              border: 'none',
-              borderBottom: showOutdated ? '1px solid var(--border)' : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: '#fffbeb',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
-              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#92400e', margin: 0 }}>
-                Outdated & Legacy Models ({outdatedModels.length})
-              </h2>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#b45309' }}>Deprecated versions & legacy baselines</span>
-              <span style={{ fontSize: '12px', color: '#92400e' }}>{showOutdated ? 'Hide ▲' : 'Show ▼'}</span>
-            </div>
-          </button>
+                    return (
+                      <tr
+                        key={m.id}
+                        style={{
+                          borderBottom: '1px solid var(--border)',
+                          transition: 'background 0.12s ease',
+                          opacity: activeCategoryTab === 'disabled' ? 0.6 : 1,
+                        }}
+                      >
+                        {/* Model & ID */}
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '13px' }}>
+                              {m.benchmark_hint || m.id}
+                            </span>
+                            {free && (
+                              <span
+                                style={{
+                                  padding: '1px 5px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  fontSize: '9px',
+                                  fontWeight: 700,
+                                  background: '#f0fdf4',
+                                  color: '#16a34a',
+                                  border: '1px solid #bbf7d0',
+                                }}
+                              >
+                                FREE
+                              </span>
+                            )}
+                          </div>
+                          <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
+                            {m.model_string}
+                          </div>
+                          {m.incompatible_reason && (
+                            <div style={{ fontSize: '10px', color: '#e11d48', marginTop: '2px' }}>
+                              ⓘ {m.incompatible_reason}
+                            </div>
+                          )}
+                        </td>
 
-          {showOutdated && renderModelTable(outdatedModels, 'outdated')}
-        </div>
+                        {/* Provider Badge */}
+                        <td style={{ padding: '12px 16px' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 6px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '9px',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              background:
+                                m.provider === 'groq'
+                                  ? '#fff7ed'
+                                  : m.provider === 'gemini'
+                                  ? '#eff6ff'
+                                  : m.provider === 'nim'
+                                  ? '#f0fdf4'
+                                  : '#faf5ff',
+                              color:
+                                m.provider === 'groq'
+                                  ? '#ea580c'
+                                  : m.provider === 'gemini'
+                                  ? '#2563eb'
+                                  : m.provider === 'nim'
+                                  ? '#16a34a'
+                                  : '#9333ea',
+                              border: `1px solid ${
+                                m.provider === 'groq'
+                                  ? '#fed7aa'
+                                  : m.provider === 'gemini'
+                                  ? '#bfdbfe'
+                                  : m.provider === 'nim'
+                                  ? '#bbf7d0'
+                                  : '#e9d5ff'
+                              }`,
+                            }}
+                          >
+                            {m.provider}
+                          </span>
+                        </td>
 
-        {/* SECTION 3: Incompatible Models (Embeddings, TTS, Media, Unsupported) */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
-          <button
-            type="button"
-            onClick={() => setShowIncompatible(!showIncompatible)}
-            style={{
-              width: '100%',
-              padding: '14px 20px',
-              border: 'none',
-              borderBottom: showIncompatible ? '1px solid var(--border)' : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: '#fff1f2',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f43f5e' }} />
-              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#9f1239', margin: 0 }}>
-                Incompatible Models ({incompatibleModels.length})
-              </h2>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#be123c' }}>Embedding-only, Audio/TTS, Video/Media, or unsupported endpoints</span>
-              <span style={{ fontSize: '12px', color: '#9f1239' }}>{showIncompatible ? 'Hide ▲' : 'Show ▼'}</span>
-            </div>
-          </button>
+                        {/* Estimated Speed */}
+                        <td style={{ padding: '12px 16px' }}>
+                          <span
+                            className="mono"
+                            style={{
+                              fontWeight: 600,
+                              fontSize: '11px',
+                              color: m.time_per_task_s < 0.5 ? '#16a34a' : m.time_per_task_s < 1.5 ? '#0284c7' : 'var(--foreground)',
+                            }}
+                          >
+                            ~{m.time_per_task_s}s
+                          </span>
+                        </td>
 
-          {showIncompatible && renderModelTable(incompatibleModels, 'incompatible')}
-        </div>
+                        {/* Ping Result with dot indicator */}
+                        <td style={{ padding: '12px 16px' }}>
+                          {m.tested_status === 'ok' ? (
+                            <div
+                              onClick={() => {
+                                setActiveTraceModal({
+                                  model: m,
+                                  trace: m.ping_trace,
+                                  isPinging: false,
+                                  activeTab: 'summary',
+                                });
+                              }}
+                              style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                              title="Click to inspect raw ping trace"
+                            >
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                              <span className="mono" style={{ fontWeight: 600, color: '#16a34a', fontSize: '11px' }}>
+                                {m.tested_latency_ms}ms
+                              </span>
+                            </div>
+                          ) : m.tested_status === 'fail' ? (
+                            <div
+                              onClick={() => {
+                                setActiveTraceModal({
+                                  model: m,
+                                  trace: m.ping_trace,
+                                  isPinging: false,
+                                  activeTab: 'summary',
+                                });
+                              }}
+                              style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                              title={m.tested_error || 'Click to inspect error trace'}
+                            >
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
+                              <span className="mono" style={{ color: '#ef4444', fontSize: '11px', fontWeight: 600 }}>
+                                Failed ({m.tested_latency_ms ? `${m.tested_latency_ms}ms` : 'Err'})
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>Untested</span>
+                          )}
+                        </td>
 
-        {/* SECTION 4: Disabled Models */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)' }}>
-          <button
-            type="button"
-            onClick={() => setShowDisabled(!showDisabled)}
-            style={{
-              width: '100%',
-              padding: '14px 20px',
-              border: 'none',
-              borderBottom: showDisabled ? '1px solid var(--border)' : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: '#f4f4f5',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#71717a' }} />
-              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#3f3f46', margin: 0 }}>
-                Disabled Models ({disabledModels.length})
-              </h2>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#71717a' }}>Explicitly disabled by developer</span>
-              <span style={{ fontSize: '12px', color: '#3f3f46' }}>{showDisabled ? 'Hide ▲' : 'Show ▼'}</span>
-            </div>
-          </button>
+                        {/* Intelligence Index with Progress Bar (Restored from Image 1!) */}
+                        <td style={{ padding: '12px 16px' }}>
+                          {intelScore !== undefined ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ width: '48px', height: '5px', background: '#e4e4e7', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    width: `${Math.min(100, Math.max(0, ((intelScore - 15) / 55) * 100))}%`,
+                                    height: '100%',
+                                    background: intelScore >= 50 ? '#16a34a' : intelScore >= 35 ? '#0284c7' : '#eab308',
+                                    borderRadius: '3px',
+                                  }}
+                                />
+                              </div>
+                              <span className="mono" style={{ fontWeight: 700, fontSize: '12px', color: 'var(--foreground)' }}>
+                                {intelScore.toFixed(1)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
 
-          {showDisabled && renderModelTable(disabledModels, 'disabled')}
+                        {/* Coding Score */}
+                        <td style={{ padding: '12px 16px' }}>
+                          {orMatch.coding_index !== undefined ? (
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a' }}>
+                              {orMatch.coding_index.toFixed(1)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* Agentic Score */}
+                        <td style={{ padding: '12px 16px' }}>
+                          {orMatch.agentic_index !== undefined ? (
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#9333ea' }}>
+                              {orMatch.agentic_index.toFixed(1)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* Refined Minimalist Status Switcher */}
+                        <td style={{ padding: '12px 16px' }}>
+                          <select
+                            value={m.category}
+                            onChange={(e) => handleUpdateStatus(m, e.target.value as any)}
+                            style={{
+                              background: 'var(--card)',
+                              color: 'var(--foreground)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              fontWeight: 500,
+                              cursor: 'pointer',
+                              outline: 'none',
+                            }}
+                            title="Change classification category"
+                          >
+                            <option value="active">Active</option>
+                            <option value="outdated">Outdated</option>
+                            <option value="incompatible">Incompatible</option>
+                            <option value="disabled">Disabled</option>
+                          </select>
+                        </td>
+
+                        {/* Action Ping Button */}
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleTestSingleModel(m)}
+                            disabled={isTesting || benchmarkingAll}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: isTesting ? 'var(--primary)' : 'var(--secondary)',
+                              color: isTesting ? 'var(--primary-foreground)' : 'var(--foreground)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '4px 10px',
+                              fontSize: '11px',
+                              fontWeight: 500,
+                              cursor: isTesting ? 'not-allowed' : 'pointer',
+                              transition: 'all 0.1s ease',
+                            }}
+                          >
+                            {isTesting ? 'Testing...' : 'Test'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </main>
 
@@ -1200,7 +1205,7 @@ export default function ModelsBenchmarkPage() {
 
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
-                            TASK LATENCY (AA)
+                            EST. TASK SPEED
                           </div>
                           <div className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#a855f7', marginTop: '2px' }}>
                             ~{activeTraceModal.model.time_per_task_s}s

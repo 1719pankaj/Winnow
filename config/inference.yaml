@@ -285,17 +285,15 @@ model_policy:
   fallback_chain:
     - or-glm-5-3-flash
     - or-gemini-3.7-flash
-    - or-glm-5-2-free
     - or-minimax-m3-free
     - or-nemotron-3-ultra-free
-    - or-inkling-free
     - groq-gpt-120b
     - groq-qwen-27b
     - nim-nemotron-3-ultra
     - or-deepseek-v4-pro
-    - gemini-3.5-flash
-    - or-laguna-s2-1-free
     - or-gemma-4-31b-free
+    - or-gemma-4-26b-legacy
+    - or-dots-3-note-legacy
     - or-free-router
   embed_model: or-gemini-3.7-flash
   refresh_metrics_every_hours: 24

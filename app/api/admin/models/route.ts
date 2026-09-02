@@ -59,10 +59,10 @@ export function classifyModelCategory(
   dbStatusOverride?: string | null,
   isProviderEnabled: boolean = true
 ): { category: 'active' | 'outdated' | 'incompatible' | 'disabled'; reason?: string } {
-  // 1. Explicit manual override takes priority
-  if (dbStatusOverride === 'disabled') return { category: 'disabled', reason: 'Manually disabled by admin' };
-  if (dbStatusOverride === 'incompatible') return { category: 'incompatible', reason: 'Flagged incompatible by admin' };
-  if (dbStatusOverride === 'outdated') return { category: 'outdated', reason: 'Flagged outdated / legacy by admin' };
+  // 1. Status stored in Turso DB takes priority
+  if (dbStatusOverride === 'disabled') return { category: 'disabled', reason: 'Disabled in Turso' };
+  if (dbStatusOverride === 'incompatible') return { category: 'incompatible', reason: 'Flagged incompatible in Turso' };
+  if (dbStatusOverride === 'outdated') return { category: 'outdated', reason: 'Flagged outdated / legacy in Turso' };
   if (dbStatusOverride === 'active') return { category: 'active' };
 
   // 2. Provider disabled

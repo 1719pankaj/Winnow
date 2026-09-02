@@ -36,25 +36,41 @@ export default function HomePage() {
       .catch((err) => console.error('Failed to load cached models', err));
   }, []);
 
-  // Filter out legacy models for dynamic slider mapping
+  // Filter for dynamic slider mapping: Only active models responding with OK in <= 3 seconds (3000ms)
   const activeModels: ActiveModelOption[] = useMemo(() => {
     if (!modelItems || modelItems.length === 0) {
       return [
-        { id: 'groq-gpt-20b', label: 'Groq GPT-OSS 20B', provider: 'groq', intelligenceIndex: 15.2 },
-        { id: 'groq-gpt-120b', label: 'Groq GPT-OSS 120B', provider: 'groq', intelligenceIndex: 24.1 },
-        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B', provider: 'groq', intelligenceIndex: 37.7 },
+        { id: 'groq-gpt-20b', label: 'Groq GPT-OSS 20B (~0.3s)', provider: 'groq', intelligenceIndex: 15.2 },
+        { id: 'groq-gpt-120b', label: 'Groq GPT-OSS 120B (~0.35s)', provider: 'groq', intelligenceIndex: 24.1 },
+        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B (~0.35s)', provider: 'groq', intelligenceIndex: 37.7 },
         { id: 'or-gemma-4-31b-free', label: 'Gemma 4 31B (Free)', provider: 'openrouter', intelligenceIndex: 29.7 },
         { id: 'or-nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (Free)', provider: 'openrouter', intelligenceIndex: 38.3 },
-        { id: 'or-inkling-free', label: 'ThinkingMachines Inkling (Free)', provider: 'openrouter', intelligenceIndex: 42.3 },
         { id: 'or-minimax-m3-free', label: 'MiniMax M3 (Free)', provider: 'openrouter', intelligenceIndex: 45.4 },
-        { id: 'or-glm-5-2-free', label: 'Z.ai GLM 5.2 (Free)', provider: 'openrouter', intelligenceIndex: 52.6 },
         { id: 'or-gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'openrouter', intelligenceIndex: 56.0 },
         { id: 'or-glm-5-3-flash', label: 'Z.ai GLM 5.3 Flash', provider: 'openrouter', intelligenceIndex: 57.5 },
       ];
     }
 
     return modelItems
-      .filter((m) => !m.id.includes('legacy') && !(m.benchmark_hint || '').toLowerCase().includes('legacy'))
+      .filter((m) => {
+        // 1. Must be in active category (not disabled, incompatible, or outdated)
+        if (m.category !== 'active') return false;
+
+        // 2. Must not have failed ping
+        if (m.tested_status === 'fail') return false;
+
+        // 3. Strict 3-second rule: Must respond with OK in <= 3000ms
+        if (m.tested_latency_ms !== undefined && m.tested_latency_ms > 3000) {
+          return false;
+        }
+
+        // 4. If untested, verify expected task latency is <= 3.0s
+        if (m.tested_latency_ms === undefined && m.time_per_task_s > 3.0) {
+          return false;
+        }
+
+        return true;
+      })
       .map((m) => ({
         id: m.id,
         label: m.benchmark_hint || m.id,

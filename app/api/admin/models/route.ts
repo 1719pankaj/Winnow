@@ -3,23 +3,9 @@ import { loadConfig } from '@/lib/config/loader';
 import { fetchOpenRouterModels, matchOpenRouterModel } from '@/lib/benchmarks';
 import { fetchNimModels, fetchGroqModels, fetchGoogleGeminiModels } from '@/lib/provider_catalog';
 import { store } from '@/lib/store';
+import { executePing, PingTrace } from '@/lib/pings';
 
-export interface PingTrace {
-  model_id: string;
-  provider: string;
-  model_string: string;
-  endpoint_url: string;
-  method: string;
-  request_headers: Record<string, string>;
-  request_body: any;
-  response_status: number;
-  response_status_text: string;
-  response_body?: any;
-  response_raw_text?: string;
-  latency_ms: number;
-  error?: string;
-  timestamp: string;
-}
+export type { PingTrace };
 
 export interface ModelBenchmarkItem {
   id: string;
@@ -150,198 +136,7 @@ function estimateTimePerTask(m: any, match: any): number {
   return 1.8;
 }
 
-function maskApiKey(key?: string): string {
-  if (!key) return '(not provided)';
-  if (key.length <= 8) return '********';
-  return `${key.slice(0, 4)}...${key.slice(-4)}`;
-}
 
-async function executePing(provider: any, model: any): Promise<PingTrace> {
-  const t0 = Date.now();
-  const timestamp = new Date().toISOString();
-
-  if (provider.name === 'gemini') {
-    const apiKey = provider.api_key || process.env.GEMINI_AI_STUDIO_KEY || '';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.model_string}:generateContent?key=${apiKey}`;
-    const maskedEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.model_string}:generateContent?key=${maskApiKey(apiKey)}`;
-
-    const bodyObj: any = {
-      contents: [{ parts: [{ text: 'Say "OK"' }] }],
-      generationConfig: {
-        maxOutputTokens: 10,
-        temperature: 0.1,
-      },
-    };
-
-    if (model.capabilities?.thinking_budget) {
-      bodyObj.generationConfig.thinkingConfig = {
-        thinkingBudget: model.capabilities.thinking_budget,
-      };
-    }
-
-    const maskedHeaders = {
-      'Content-Type': 'application/json',
-    };
-
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: maskedHeaders,
-        body: JSON.stringify(bodyObj),
-      });
-
-      const latency_ms = Date.now() - t0;
-      const rawText = await res.text();
-      let parsedBody: any;
-      try {
-        parsedBody = JSON.parse(rawText);
-      } catch {
-        parsedBody = null;
-      }
-
-      if (!res.ok) {
-        return {
-          model_id: model.id,
-          provider: provider.name,
-          model_string: model.model_string,
-          endpoint_url: maskedEndpoint,
-          method: 'POST',
-          request_headers: maskedHeaders,
-          request_body: bodyObj,
-          response_status: res.status,
-          response_status_text: res.statusText,
-          response_body: parsedBody,
-          response_raw_text: rawText,
-          latency_ms,
-          error: parsedBody?.error?.message || `HTTP ${res.status}: ${res.statusText}`,
-          timestamp,
-        };
-      }
-
-      return {
-        model_id: model.id,
-        provider: provider.name,
-        model_string: model.model_string,
-        endpoint_url: maskedEndpoint,
-        method: 'POST',
-        request_headers: maskedHeaders,
-        request_body: bodyObj,
-        response_status: res.status,
-        response_status_text: res.statusText,
-        response_body: parsedBody,
-        response_raw_text: rawText,
-        latency_ms,
-        timestamp,
-      };
-    } catch (err: any) {
-      return {
-        model_id: model.id,
-        provider: provider.name,
-        model_string: model.model_string,
-        endpoint_url: maskedEndpoint,
-        method: 'POST',
-        request_headers: maskedHeaders,
-        request_body: bodyObj,
-        response_status: 0,
-        response_status_text: 'Network / Timeout Error',
-        latency_ms: Date.now() - t0,
-        error: err.message || 'Connection failed',
-        timestamp,
-      };
-    }
-  } else {
-    // OpenAI Compatible Provider (Groq, NIM, OpenRouter)
-    const apiKey = provider.api_key || '';
-    const baseUrl = provider.base_url.replace(/\/$/, '');
-    const endpoint = `${baseUrl}/chat/completions`;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      ...(provider.extra_headers || {}),
-    };
-
-    const maskedHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${maskApiKey(apiKey)}`,
-      ...(provider.extra_headers || {}),
-    };
-
-    const bodyObj = {
-      model: model.model_string,
-      messages: [{ role: 'user', content: 'Say "OK"' }],
-      max_tokens: 10,
-      temperature: 0.1,
-    };
-
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(bodyObj),
-      });
-
-      const latency_ms = Date.now() - t0;
-      const rawText = await res.text();
-      let parsedBody: any;
-      try {
-        parsedBody = JSON.parse(rawText);
-      } catch {
-        parsedBody = null;
-      }
-
-      if (!res.ok) {
-        return {
-          model_id: model.id,
-          provider: provider.name,
-          model_string: model.model_string,
-          endpoint_url: endpoint,
-          method: 'POST',
-          request_headers: maskedHeaders,
-          request_body: bodyObj,
-          response_status: res.status,
-          response_status_text: res.statusText,
-          response_body: parsedBody,
-          response_raw_text: rawText,
-          latency_ms,
-          error: parsedBody?.error?.message || `HTTP ${res.status}: ${res.statusText}`,
-          timestamp,
-        };
-      }
-
-      return {
-        model_id: model.id,
-        provider: provider.name,
-        model_string: model.model_string,
-        endpoint_url: endpoint,
-        method: 'POST',
-        request_headers: maskedHeaders,
-        request_body: bodyObj,
-        response_status: res.status,
-        response_status_text: res.statusText,
-        response_body: parsedBody,
-        response_raw_text: rawText,
-        latency_ms,
-        timestamp,
-      };
-    } catch (err: any) {
-      return {
-        model_id: model.id,
-        provider: provider.name,
-        model_string: model.model_string,
-        endpoint_url: endpoint,
-        method: 'POST',
-        request_headers: maskedHeaders,
-        request_body: bodyObj,
-        response_status: 0,
-        response_status_text: 'Network / Timeout Error',
-        latency_ms: Date.now() - t0,
-        error: err.message || 'Connection failed',
-        timestamp,
-      };
-    }
-  }
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -685,7 +480,7 @@ export async function POST(req: NextRequest) {
 
       // Execute live ping trace
       const trace = await executePing(p, m);
-      const isOk = trace.response_status >= 200 && trace.response_status < 300 && !trace.error;
+      const isOk = trace.response_status >= 200 && trace.response_status < 300 && !trace.error && trace.latency_ms <= 5000;
 
       const item: ModelBenchmarkItem = {
         id: m.id,

@@ -1,4 +1,5 @@
 import { fetchOpenRouterModels, OpenRouterModelCard, matchOpenRouterModel } from './benchmarks';
+import { fetchGoogleGeminiModels, GoogleGeminiApiModel } from './gemini_catalog';
 import { loadConfig } from './config/loader';
 import { store } from './store';
 
@@ -22,16 +23,21 @@ export interface CatalogModelItem {
 }
 
 /**
- * Synchronize live provider models from OpenRouter, Cerebras, Groq, Gemini, and NIM
+ * Synchronize live provider models from Google Gemini, OpenRouter, Groq, and NIM
  */
 export async function syncLiveModelCatalog(): Promise<CatalogModelItem[]> {
   await store.init();
   const config = loadConfig();
   const providers = config.inference.inference_providers;
   const provMap = new Map(providers.map((p) => [p.name, p]));
+  const geminiProvider = provMap.get('gemini');
 
   // 1. Fetch live OpenRouter models catalog (420+ models)
   const orModels = await fetchOpenRouterModels();
+
+  // 2. Fetch live Google Gemini models (50+ official models)
+  const googleModels = await fetchGoogleGeminiModels(geminiProvider?.api_key);
+
   const cachedDbCards = await store.getCachedModelCards();
   const dbCardMap = new Map(cachedDbCards.map((c) => [c.id, c]));
 
@@ -51,7 +57,7 @@ export async function syncLiveModelCatalog(): Promise<CatalogModelItem[]> {
 
     const isFree = m.cost === 'free' || m.model_string.endsWith(':free') || (orCard?.pricing?.prompt === '0' && orCard?.pricing?.completion === '0');
     const isLegacy = m.id.includes('legacy') || (m as any).benchmark_hint?.includes('legacy');
-    const isSpeed = m.provider === 'cerebras' || m.provider === 'groq';
+    const isSpeed = m.provider === 'groq';
 
     let category: 'free' | 'frontier' | 'speed' | 'legacy' = 'frontier';
     if (isLegacy) category = 'legacy';
@@ -75,7 +81,44 @@ export async function syncLiveModelCatalog(): Promise<CatalogModelItem[]> {
     });
   }
 
-  // B. Auto-discover all active FREE models from OpenRouter that aren't in config yet
+  // B. Auto-discover all live Google Gemini models from Google AI Studio API
+  for (const gm of googleModels) {
+    const rawModelString = gm.name.replace(/^models\//, '');
+    const customId = `gemini-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+    // Skip if already configured or seen
+    if (seenIds.has(customId) || seenIds.has(rawModelString)) continue;
+    seenIds.add(customId);
+
+    const match = matchOpenRouterModel(customId, rawModelString, gm.displayName, orModels);
+    const orCard = match.matched_model;
+    const aa = orCard?.benchmarks?.artificial_analysis;
+    const dbCard = dbCardMap.get(customId);
+
+    const isLegacy = rawModelString.includes('legacy') || rawModelString.includes('preview-09') || rawModelString.includes('preview-10');
+    const isEmbedding = rawModelString.includes('embedding');
+
+    let category: 'free' | 'frontier' | 'speed' | 'legacy' = 'frontier';
+    if (isLegacy) category = 'legacy';
+
+    catalog.push({
+      id: customId,
+      provider: 'gemini',
+      model_string: rawModelString,
+      name: gm.displayName || `Google: ${rawModelString}`,
+      category,
+      is_free: false,
+      pricing: orCard?.pricing ? { prompt: orCard.pricing.prompt, completion: orCard.pricing.completion } : undefined,
+      context_length: gm.inputTokenLimit || 1000000,
+      intelligence_index: aa?.intelligence_index ?? dbCard?.intelligence_index,
+      coding_index: aa?.coding_index ?? dbCard?.coding_index,
+      agentic_index: aa?.agentic_index ?? dbCard?.agentic_index,
+      tested_latency_ms: dbCard?.tested_latency_ms,
+      tested_status: !geminiProvider?.enabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
+    });
+  }
+
+  // C. Auto-discover all active FREE models from OpenRouter
   const freeORModels = orModels.filter((m) => 
     m.id.endsWith(':free') || 
     (m.pricing && m.pricing.prompt === '0' && m.pricing.completion === '0')

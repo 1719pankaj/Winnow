@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ModelBenchmarkItem } from '../api/admin/models/route';
 
-type SortKey = 'name' | 'provider' | 'tested_latency' | 'livebench_score' | 'match_status';
+type SortKey = 'name' | 'provider' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
 type SortOrder = 'asc' | 'desc';
 
 export default function ModelsBenchmarkPage() {
@@ -16,10 +16,10 @@ export default function ModelsBenchmarkPage() {
   const [showOutdated, setShowOutdated] = useState(true);
 
   // Sorting state
-  const [sortKey, setSortKey] = useState<SortKey>('livebench_score');
+  const [sortKey, setSortKey] = useState<SortKey>('intelligence_index');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
-  // Load initial model list and LiveBench metrics
+  // Load initial model list and OpenRouter metrics
   const fetchModels = async () => {
     try {
       setLoading(true);
@@ -85,7 +85,7 @@ export default function ModelsBenchmarkPage() {
   };
 
   const isModelOutdated = (m: ModelBenchmarkItem) => {
-    return m.id.includes('legacy') || (m.livebench_hint || '').toLowerCase().includes('legacy');
+    return m.id.includes('legacy') || (m.benchmark_hint || '').toLowerCase().includes('legacy');
   };
 
   const handleHeaderSort = (key: SortKey) => {
@@ -99,34 +99,40 @@ export default function ModelsBenchmarkPage() {
 
   const sortModels = (list: ModelBenchmarkItem[]) => {
     return [...list].sort((a, b) => {
-      let valA: any = 0;
-      let valB: any = 0;
+      let valA: any;
+      let valB: any;
 
       switch (sortKey) {
         case 'name':
-          valA = (a.livebench_hint || a.id).toLowerCase();
-          valB = (b.livebench_hint || b.id).toLowerCase();
-          return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-
+          valA = (a.benchmark_hint || a.id).toLowerCase();
+          valB = (b.benchmark_hint || b.id).toLowerCase();
+          break;
         case 'provider':
           valA = a.provider.toLowerCase();
           valB = b.provider.toLowerCase();
-          return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-
+          break;
         case 'tested_latency':
-          valA = a.tested_latency_ms ?? 999999;
-          valB = b.tested_latency_ms ?? 999999;
+          valA = a.tested_latency_ms !== undefined ? a.tested_latency_ms : 999999;
+          valB = b.tested_latency_ms !== undefined ? b.tested_latency_ms : 999999;
           break;
-
-        case 'livebench_score':
-          valA = a.livebench_match.overall_score ?? 0;
-          valB = b.livebench_match.overall_score ?? 0;
+        case 'intelligence_index':
+          valA = a.openrouter_match.intelligence_index !== undefined ? a.openrouter_match.intelligence_index : -1;
+          valB = b.openrouter_match.intelligence_index !== undefined ? b.openrouter_match.intelligence_index : -1;
           break;
-
+        case 'coding_index':
+          valA = a.openrouter_match.coding_index !== undefined ? a.openrouter_match.coding_index : -1;
+          valB = b.openrouter_match.coding_index !== undefined ? b.openrouter_match.coding_index : -1;
+          break;
+        case 'agentic_index':
+          valA = a.openrouter_match.agentic_index !== undefined ? a.openrouter_match.agentic_index : -1;
+          valB = b.openrouter_match.agentic_index !== undefined ? b.openrouter_match.agentic_index : -1;
+          break;
         case 'match_status':
-          valA = a.livebench_match.status === 'success' ? 1 : 0;
-          valB = b.livebench_match.status === 'success' ? 1 : 0;
+          valA = a.openrouter_match.status === 'success' ? 1 : 0;
+          valB = b.openrouter_match.status === 'success' ? 1 : 0;
           break;
+        default:
+          return 0;
       }
 
       if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
@@ -135,256 +141,123 @@ export default function ModelsBenchmarkPage() {
     });
   };
 
-  // Filtered model list
-  const activeModels = useMemo(() => {
-    const filtered = models.filter((m) => {
-      if (isModelOutdated(m)) return false;
-      const matchProvider = selectedProvider === 'all' || m.provider === selectedProvider;
-      const matchSearch =
-        m.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        m.model_string.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        (m.livebench_match.matched_name || '').toLowerCase().includes(searchFilter.toLowerCase());
-      return matchProvider && matchSearch;
+  const filteredModels = useMemo(() => {
+    return models.filter((m) => {
+      if (selectedProvider !== 'all' && m.provider !== selectedProvider) {
+        return false;
+      }
+      if (searchFilter.trim()) {
+        const q = searchFilter.toLowerCase();
+        const matchName = (m.benchmark_hint || '').toLowerCase().includes(q);
+        const matchId = m.id.toLowerCase().includes(q);
+        const matchStr = m.model_string.toLowerCase().includes(q);
+        const matchProv = m.provider.toLowerCase().includes(q);
+        if (!matchName && !matchId && !matchStr && !matchProv) return false;
+      }
+      return true;
     });
-    return sortModels(filtered);
-  }, [models, selectedProvider, searchFilter, sortKey, sortOrder]);
+  }, [models, selectedProvider, searchFilter]);
+
+  const activeModels = useMemo(() => {
+    return sortModels(filteredModels.filter((m) => !isModelOutdated(m)));
+  }, [filteredModels, sortKey, sortOrder]);
 
   const outdatedModels = useMemo(() => {
-    const filtered = models.filter((m) => {
-      if (!isModelOutdated(m)) return false;
-      const matchProvider = selectedProvider === 'all' || m.provider === selectedProvider;
-      const matchSearch =
-        m.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        m.model_string.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        (m.livebench_match.matched_name || '').toLowerCase().includes(searchFilter.toLowerCase());
-      return matchProvider && matchSearch;
-    });
-    return sortModels(filtered);
-  }, [models, selectedProvider, searchFilter, sortKey, sortOrder]);
-
-  const providersList = ['all', ...Array.from(new Set(models.map((m) => m.provider)))];
+    return sortModels(filteredModels.filter((m) => isModelOutdated(m)));
+  }, [filteredModels, sortKey, sortOrder]);
 
   const renderSortIndicator = (key: SortKey) => {
     if (sortKey !== key) {
-      return <span style={{ opacity: 0.35, marginLeft: '4px', fontSize: '10px' }}>⇅</span>;
+      return <span style={{ opacity: 0.3, marginLeft: '4px', fontSize: '10px' }}>⇅</span>;
     }
     return (
-      <span style={{ marginLeft: '4px', color: 'var(--foreground)', fontSize: '10px', fontWeight: 700 }}>
+      <span style={{ color: 'var(--foreground)', marginLeft: '4px', fontSize: '10px' }}>
         {sortOrder === 'asc' ? '▲' : '▼'}
       </span>
-    );
-  };
-
-  const renderModelRow = (m: ModelBenchmarkItem) => {
-    const isTesting = testingModelId === m.id;
-    const match = m.livebench_match;
-
-    return (
-      <tr key={m.id} style={{ borderBottom: '1px solid #f4f4f5', transition: 'background 0.1s' }}>
-        {/* Model Name & String */}
-        <td style={{ padding: '12px 16px' }}>
-          <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>
-            {m.livebench_hint || m.id}
-          </div>
-          <div className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
-            {m.model_string}
-          </div>
-        </td>
-
-        {/* Provider */}
-        <td style={{ padding: '12px 16px' }}>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '2px 8px',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '11px',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              background:
-                m.provider === 'cerebras'
-                  ? '#fef3c7'
-                  : m.provider === 'groq'
-                  ? '#ffedd5'
-                  : m.provider === 'gemini'
-                  ? '#e0f2fe'
-                  : m.provider === 'nim'
-                  ? '#dcfce7'
-                  : '#f3e8ff',
-              color:
-                m.provider === 'cerebras'
-                  ? '#92400e'
-                  : m.provider === 'groq'
-                  ? '#9a3412'
-                  : m.provider === 'gemini'
-                  ? '#0369a1'
-                  : m.provider === 'nim'
-                  ? '#166534'
-                  : '#6b21a8',
-            }}
-          >
-            {m.provider}
-          </span>
-        </td>
-
-        {/* Live Tested Latency */}
-        <td style={{ padding: '12px 16px' }}>
-          {m.tested_status === 'ok' && m.tested_latency_ms !== undefined ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
-              <span className="mono" style={{ fontWeight: 600, color: '#16a34a' }}>
-                {m.tested_latency_ms}ms
-              </span>
-            </div>
-          ) : m.tested_status === 'fail' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
-              <span className="mono" style={{ fontSize: '11px', color: '#dc2626' }} title={m.tested_error}>
-                Failed ({m.tested_latency_ms ? `${m.tested_latency_ms}ms` : 'Err'})
-              </span>
-            </div>
-          ) : m.tested_status === 'disabled' ? (
-            <span style={{ color: 'var(--muted-foreground)', fontSize: '12px' }}>Disabled</span>
-          ) : (
-            <span style={{ color: 'var(--muted-foreground)', fontSize: '12px' }}>Untested</span>
-          )}
-        </td>
-
-        {/* LiveBench Overall Score */}
-        <td style={{ padding: '12px 16px' }}>
-          {match.overall_score !== undefined ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '56px', height: '6px', background: '#e4e4e7', borderRadius: '3px', overflow: 'hidden' }}>
-                <div
-                  style={{
-                    width: `${match.overall_score}%`,
-                    height: '100%',
-                    background: match.overall_score >= 75 ? '#0284c7' : match.overall_score >= 65 ? '#16a34a' : '#eab308',
-                    borderRadius: '3px',
-                  }}
-                />
-              </div>
-              <span className="mono" style={{ fontWeight: 700, fontSize: '13px', color: match.overall_score >= 75 ? '#0369a1' : 'var(--foreground)' }}>
-                {match.overall_score}
-              </span>
-            </div>
-          ) : (
-            <span style={{ color: 'var(--muted-foreground)', fontSize: '12px' }}>—</span>
-          )}
-        </td>
-
-        {/* LiveBench Match */}
-        <td style={{ padding: '12px 16px' }}>
-          {match.status === 'success' ? (
-            <div>
-              <span
-                style={{
-                  background: '#f0fdf4',
-                  color: '#166534',
-                  border: '1px solid #bbf7d0',
-                  padding: '1px 6px',
-                  borderRadius: '4px',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  display: 'inline-block',
-                }}
-              >
-                ✓ Matched
-              </span>
-              <div style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
-                {match.matched_name}
-              </div>
-            </div>
-          ) : (
-            <span
-              style={{
-                background: '#fee2e2',
-                color: '#991b1b',
-                padding: '1px 6px',
-                borderRadius: '4px',
-                fontSize: '10px',
-                fontWeight: 600,
-                display: 'inline-block',
-              }}
-            >
-              ✗ No Match
-            </span>
-          )}
-        </td>
-
-        {/* Action Button */}
-        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-          <button
-            type="button"
-            onClick={() => handleTestSingleModel(m.id)}
-            disabled={isTesting || benchmarkingAll}
-            style={{
-              background: 'var(--secondary)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '4px 10px',
-              fontSize: '11px',
-              fontWeight: 500,
-              color: 'var(--foreground)',
-              cursor: 'pointer',
-              transition: 'all 0.1s',
-            }}
-          >
-            {isTesting ? 'Testing...' : 'Test'}
-          </button>
-        </td>
-      </tr>
     );
   };
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
       {/* Top Navbar */}
-      <header style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 50,
-        width: '100%',
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        backdropFilter: 'blur(8px)',
-        borderBottom: '1px solid var(--border)',
-      }}>
-        <div style={{
-          maxWidth: '1200px',
-          margin: '0 auto',
-          padding: '0 24px',
-          height: '56px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          {/* Left: Brand + Breadcrumb */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <a href="/" className="brand-link">
-              <div className="brand-icon">W</div>
+      <header className="results-header-sticky">
+        <div className="results-header-container" style={{ justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <a href="/" className="header-brand-link">
               <span>Winnow</span>
             </a>
-            <span style={{ color: '#d4d4d8', fontSize: '14px' }}>/</span>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
-              Models & Benchmarks
-            </span>
+            <div style={{ height: '16px', width: '1px', background: 'var(--border)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted-foreground)' }}>
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line>
+              </svg>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
+                OpenRouter Model Ratings & Live Latency Matrix
+              </span>
+            </div>
           </div>
 
-          {/* Right: Actions */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button
-              type="button"
-              className="btn-primary"
               onClick={handleRunAllBenchmarks}
-              disabled={benchmarkingAll}
+              disabled={benchmarkingAll || loading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: 'var(--primary)',
+                color: 'var(--primary-foreground)',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 14px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: benchmarkingAll ? 'not-allowed' : 'pointer',
+                opacity: benchmarkingAll ? 0.7 : 1,
+                boxShadow: 'var(--shadow-subtle)',
+                transition: 'all 0.15s ease',
+              }}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-              </svg>
-              <span>{benchmarkingAll ? 'Benchmarking...' : 'Run Live Benchmark on All'}</span>
+              {benchmarkingAll ? (
+                <>
+                  <svg className="spin-animate" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                  </svg>
+                  <span>Benchmarking All...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  <span>Run Live Benchmark on All</span>
+                </>
+              )}
             </button>
 
-            <a href="/" className="btn-outline">
+            <a
+              href="/"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                textDecoration: 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
               <span>Back to Search</span>
             </a>
           </div>
@@ -392,87 +265,58 @@ export default function ModelsBenchmarkPage() {
       </header>
 
       {/* Main Content Area */}
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '28px 24px 80px' }}>
-        {/* Title Header */}
-        <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--foreground)' }}>
-            AI Models & LiveBench Matrix
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--muted-foreground)', marginTop: '4px' }}>
-            Open contamination-free benchmark scores from <a href="https://livebench.ai" target="_blank" rel="noreferrer" style={{ textDecoration: 'underline', color: 'var(--foreground)', fontWeight: 500 }}>LiveBench (livebench.ai)</a> with real-time tested inference speeds.
-          </p>
-        </div>
-
-        {/* Summary KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', boxShadow: 'var(--shadow-subtle)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Active Models
-            </div>
-            <div style={{ fontSize: '22px', fontWeight: 700, marginTop: '2px', color: 'var(--foreground)' }}>
-              {activeModels.length} <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>active ({outdatedModels.length} legacy)</span>
-            </div>
-          </div>
-
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', boxShadow: 'var(--shadow-subtle)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Top LiveBench Score
-            </div>
-            <div style={{ fontSize: '22px', fontWeight: 700, marginTop: '2px', color: '#0284c7' }}>
-              78.8 <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>(Gemini 3.7 Flash)</span>
-            </div>
-          </div>
-
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', boxShadow: 'var(--shadow-subtle)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              DeepSeek V4 Pro Score
-            </div>
-            <div style={{ fontSize: '22px', fontWeight: 700, marginTop: '2px', color: '#16a34a' }}>
-              77.4 <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>(0813 release)</span>
-            </div>
-          </div>
-
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', boxShadow: 'var(--shadow-subtle)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              LiveBench Matches
-            </div>
-            <div style={{ fontSize: '22px', fontWeight: 700, marginTop: '2px', color: 'var(--foreground)' }}>
-              {models.filter((m) => m.livebench_match.status === 'success').length} / {models.length}{' '}
-              <span style={{ fontSize: '12px', fontWeight: 500, color: '#16a34a' }}>Verified</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Filter & Search Bar with native segmented controls */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', marginBottom: '18px', flexWrap: 'wrap' }}>
-          {/* Provider Filter Segmented Tabs */}
-          <div className="segmented-control">
-            {providersList.map((p) => (
+      <main style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px 32px' }}>
+        {/* Controls Row: Provider Filter Pills & Search */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+          {/* Provider Filter Segmented Pills */}
+          <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
+            {[
+              { id: 'all', label: 'ALL PROVIDERS' },
+              { id: 'cerebras', label: 'CEREBRAS' },
+              { id: 'groq', label: 'GROQ' },
+              { id: 'gemini', label: 'GEMINI' },
+              { id: 'nim', label: 'NIM' },
+              { id: 'openrouter', label: 'OPENROUTER' },
+            ].map((p) => (
               <button
-                key={p}
+                key={p.id}
                 type="button"
-                className={`segmented-btn ${selectedProvider === p ? 'active' : ''}`}
-                onClick={() => setSelectedProvider(p)}
-                style={{ textTransform: 'capitalize' }}
+                className={`tier-tab-btn ${selectedProvider === p.id ? 'active' : ''}`}
+                onClick={() => setSelectedProvider(p.id)}
+                style={{ fontSize: '11px', padding: '4px 10px', textTransform: 'uppercase' }}
               >
-                {p === 'all' ? 'All Providers' : p.toUpperCase()}
+                {p.label}
               </button>
             ))}
           </div>
 
-          {/* Search Input */}
-          <div style={{ position: 'relative', width: '240px' }}>
+          {/* Search Filter Box */}
+          <div style={{ position: 'relative', width: '280px' }}>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-foreground)' }}
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
             <input
               type="text"
-              placeholder="Search model or provider..."
+              placeholder="Filter models or providers..."
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               style={{
                 width: '100%',
-                background: 'var(--secondary)',
+                background: 'var(--card)',
                 border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-lg)',
-                padding: '6px 12px',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 12px 6px 32px',
                 fontSize: '12px',
                 color: 'var(--foreground)',
                 outline: 'none',
@@ -481,147 +325,325 @@ export default function ModelsBenchmarkPage() {
           </div>
         </div>
 
-        {/* SECTION 1: Active & Frontier Models */}
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', paddingLeft: '2px' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)' }}>Active & Frontier Models</h2>
-            <span style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>({activeModels.length})</span>
+        {/* Active / Frontier Models Table */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '32px' }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+              <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+                Active & Frontier Models ({activeModels.length})
+              </h2>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+              Official OpenRouter API Benchmark Ratings & Live Measured Speeds
+            </span>
           </div>
 
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
               <thead>
-                <tr style={{ background: '#fafafa', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', userSelect: 'none' }}>
-                  <th
-                    style={{ padding: '10px 16px', cursor: 'pointer' }}
-                    onClick={() => handleHeaderSort('name')}
-                  >
-                    <span>Model & ID</span>
-                    {renderSortIndicator('name')}
+                <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
+                  <th onClick={() => handleHeaderSort('name')} style={{ padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}>
+                    MODEL & ID {renderSortIndicator('name')}
                   </th>
-                  <th
-                    style={{ padding: '10px 16px', cursor: 'pointer' }}
-                    onClick={() => handleHeaderSort('provider')}
-                  >
-                    <span>Provider</span>
-                    {renderSortIndicator('provider')}
+                  <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                    PROVIDER {renderSortIndicator('provider')}
                   </th>
-                  <th
-                    style={{ padding: '10px 16px', cursor: 'pointer' }}
-                    onClick={() => handleHeaderSort('tested_latency')}
-                  >
-                    <span>Live Speed</span>
-                    {renderSortIndicator('tested_latency')}
+                  <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
+                    LIVE SPEED / TPS {renderSortIndicator('tested_latency')}
                   </th>
-                  <th
-                    style={{ padding: '10px 16px', cursor: 'pointer' }}
-                    onClick={() => handleHeaderSort('livebench_score')}
-                  >
-                    <span>LiveBench Overall Score</span>
-                    {renderSortIndicator('livebench_score')}
+                  <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '160px', cursor: 'pointer', userSelect: 'none' }}>
+                    INTELLIGENCE {renderSortIndicator('intelligence_index')}
                   </th>
-                  <th
-                    style={{ padding: '10px 16px', cursor: 'pointer' }}
-                    onClick={() => handleHeaderSort('match_status')}
-                  >
-                    <span>LiveBench Match</span>
-                    {renderSortIndicator('match_status')}
+                  <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                    CODING {renderSortIndicator('coding_index')}
                   </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
+                  <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                    AGENTIC {renderSortIndicator('agentic_index')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('match_status')} style={{ padding: '10px 16px', width: '220px', cursor: 'pointer', userSelect: 'none' }}>
+                    OPENROUTER MATCH {renderSortIndicator('match_status')}
+                  </th>
+                  <th style={{ padding: '10px 16px', width: '90px', textAlign: 'right' }}>ACTION</th>
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: 'var(--muted-foreground)' }}>
-                      Loading model matrix...
-                    </td>
-                  </tr>
-                ) : activeModels.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: 'var(--muted-foreground)' }}>
-                      No active models matching filter.
-                    </td>
-                  </tr>
-                ) : (
-                  activeModels.map(renderModelRow)
-                )}
+                {activeModels.map((m) => {
+                  const orMatch = m.openrouter_match;
+                  const isTesting = testingModelId === m.id;
+
+                  return (
+                    <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s' }}>
+                      {/* Model & ID */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '13px' }}>
+                          {m.benchmark_hint || m.id}
+                        </div>
+                        <div className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
+                          {m.id} <span style={{ opacity: 0.5 }}>({m.model_string})</span>
+                        </div>
+                      </td>
+
+                      {/* Provider Badge */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                            background:
+                              m.provider === 'cerebras'
+                                ? '#fdf2f8'
+                                : m.provider === 'groq'
+                                ? '#fff7ed'
+                                : m.provider === 'gemini'
+                                ? '#eff6ff'
+                                : m.provider === 'nim'
+                                ? '#f0fdf4'
+                                : '#faf5ff',
+                            color:
+                              m.provider === 'cerebras'
+                                ? '#db2777'
+                                : m.provider === 'groq'
+                                ? '#ea580c'
+                                : m.provider === 'gemini'
+                                ? '#2563eb'
+                                : m.provider === 'nim'
+                                ? '#16a34a'
+                                : '#9333ea',
+                            border: `1px solid ${
+                              m.provider === 'cerebras'
+                                ? '#fbcfe8'
+                                : m.provider === 'groq'
+                                ? '#fed7aa'
+                                : m.provider === 'gemini'
+                                ? '#bfdbfe'
+                                : m.provider === 'nim'
+                                ? '#bbf7d0'
+                                : '#e9d5ff'
+                            }`,
+                          }}
+                        >
+                          {m.provider}
+                        </span>
+                      </td>
+
+                      {/* Live Tested Speed */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {m.tested_status === 'ok' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
+                            <span className="mono" style={{ fontWeight: 600, color: 'var(--foreground)' }}>
+                              {m.tested_latency_ms} ms
+                            </span>
+                          </div>
+                        ) : m.tested_status === 'fail' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
+                            <span style={{ color: '#ef4444', fontSize: '11px' }} title={m.tested_error}>
+                              Failed
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>Untested</span>
+                        )}
+                      </td>
+
+                      {/* OpenRouter Intelligence Index */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {orMatch.intelligence_index !== undefined ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#0284c7' }}>
+                              {orMatch.intelligence_index.toFixed(1)}
+                            </span>
+                            <div style={{ width: '50px', height: '5px', background: 'var(--muted)', borderRadius: '3px', overflow: 'hidden' }}>
+                              <div style={{ width: `${Math.min(100, (orMatch.intelligence_index / 70) * 100)}%`, height: '100%', background: '#0284c7' }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* Coding Index */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {orMatch.coding_index !== undefined ? (
+                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a' }}>
+                            {orMatch.coding_index.toFixed(1)}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* Agentic Index */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {orMatch.agentic_index !== undefined ? (
+                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#9333ea' }}>
+                            {orMatch.agentic_index.toFixed(1)}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* OpenRouter Matched Model */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {orMatch.status === 'success' ? (
+                          <div>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--foreground)' }}>
+                              ✓ {orMatch.matched_name || orMatch.matched_id}
+                            </div>
+                            {orMatch.context_length && (
+                              <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>
+                                {(orMatch.context_length / 1000).toFixed(0)}k context
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: '#ef4444' }}>✗ Not matched</span>
+                        )}
+                      </td>
+
+                      {/* Action */}
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <button
+                          onClick={() => handleTestSingleModel(m.id)}
+                          disabled={isTesting || benchmarkingAll}
+                          style={{
+                            background: 'none',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '3px 8px',
+                            fontSize: '11px',
+                            color: 'var(--foreground)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {isTesting ? '...' : 'Ping'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* SECTION 2: Outdated & Legacy Models */}
-        {outdatedModels.length > 0 && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', paddingLeft: '2px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#eab308', display: 'inline-block' }} />
-                <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)' }}>Outdated & Legacy Models</h2>
-                <span style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>({outdatedModels.length})</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowOutdated(!showOutdated)}
-                style={{ background: 'none', border: 'none', fontSize: '12px', color: 'var(--muted-foreground)', cursor: 'pointer' }}
-              >
-                {showOutdated ? 'Hide Legacy Section ▴' : 'Show Legacy Section ▾'}
-              </button>
+        {/* Collapsible Outdated / Legacy Section */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)' }}>
+          <button
+            type="button"
+            onClick={() => setShowOutdated(!showOutdated)}
+            style={{
+              width: '100%',
+              padding: '14px 20px',
+              border: 'none',
+              borderBottom: showOutdated ? '1px solid var(--border)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'var(--muted)',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#a1a1aa' }} />
+              <h2 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+                Outdated & Legacy Models ({outdatedModels.length})
+              </h2>
             </div>
+            <span style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>
+              {showOutdated ? 'Hide ▲' : 'Show ▼'}
+            </span>
+          </button>
 
-            {showOutdated && (
-              <div style={{ background: '#fafafa', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                  <thead>
-                    <tr style={{ background: '#f4f4f5', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em', userSelect: 'none' }}>
-                      <th
-                        style={{ padding: '10px 16px', cursor: 'pointer' }}
-                        onClick={() => handleHeaderSort('name')}
-                      >
-                        <span>Model & ID</span>
-                        {renderSortIndicator('name')}
-                      </th>
-                      <th
-                        style={{ padding: '10px 16px', cursor: 'pointer' }}
-                        onClick={() => handleHeaderSort('provider')}
-                      >
-                        <span>Provider</span>
-                        {renderSortIndicator('provider')}
-                      </th>
-                      <th
-                        style={{ padding: '10px 16px', cursor: 'pointer' }}
-                        onClick={() => handleHeaderSort('tested_latency')}
-                      >
-                        <span>Live Speed</span>
-                        {renderSortIndicator('tested_latency')}
-                      </th>
-                      <th
-                        style={{ padding: '10px 16px', cursor: 'pointer' }}
-                        onClick={() => handleHeaderSort('livebench_score')}
-                      >
-                        <span>LiveBench Overall Score</span>
-                        {renderSortIndicator('livebench_score')}
-                      </th>
-                      <th
-                        style={{ padding: '10px 16px', cursor: 'pointer' }}
-                        onClick={() => handleHeaderSort('match_status')}
-                      >
-                        <span>LiveBench Match</span>
-                        {renderSortIndicator('match_status')}
-                      </th>
-                      <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {outdatedModels.map(renderModelRow)}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+          {showOutdated && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
+                    <th style={{ padding: '10px 16px' }}>MODEL & ID</th>
+                    <th style={{ padding: '10px 16px', width: '110px' }}>PROVIDER</th>
+                    <th style={{ padding: '10px 16px', width: '150px' }}>LIVE SPEED</th>
+                    <th style={{ padding: '10px 16px', width: '160px' }}>INTELLIGENCE</th>
+                    <th style={{ padding: '10px 16px', width: '110px' }}>CODING</th>
+                    <th style={{ padding: '10px 16px', width: '110px' }}>AGENTIC</th>
+                    <th style={{ padding: '10px 16px', width: '220px' }}>OPENROUTER MATCH</th>
+                    <th style={{ padding: '10px 16px', width: '90px', textAlign: 'right' }}>ACTION</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outdatedModels.map((m) => {
+                    const orMatch = m.openrouter_match;
+                    const isTesting = testingModelId === m.id;
+
+                    return (
+                      <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', opacity: 0.8 }}>
+                        <td style={{ padding: '10px 16px' }}>
+                          <div style={{ fontWeight: 500, color: 'var(--foreground)' }}>{m.benchmark_hint || m.id}</div>
+                          <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>{m.id}</div>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
+                            {m.provider}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+                            {m.tested_latency_ms ? `${m.tested_latency_ms} ms` : '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#71717a' }}>
+                            {orMatch.intelligence_index !== undefined ? orMatch.intelligence_index.toFixed(1) : '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
+                            {orMatch.coding_index !== undefined ? orMatch.coding_index.toFixed(1) : '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
+                            {orMatch.agentic_index !== undefined ? orMatch.agentic_index.toFixed(1) : '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+                            {orMatch.matched_name || orMatch.matched_id || '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                          <button
+                            onClick={() => handleTestSingleModel(m.id)}
+                            disabled={isTesting || benchmarkingAll}
+                            style={{
+                              background: 'none',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '2px 6px',
+                              fontSize: '10px',
+                              color: 'var(--muted-foreground)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {isTesting ? '...' : 'Ping'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

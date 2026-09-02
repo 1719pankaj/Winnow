@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadConfig } from '@/lib/config/loader';
-import { fuzzyMatchLiveBench, LIVEBENCH_REGISTRY } from '@/lib/livebench';
+import { fetchOpenRouterModels, matchOpenRouterModel } from '@/lib/benchmarks';
 import { InferenceAdapter } from '@/lib/adapters/inference';
 import { store, CachedModelCard } from '@/lib/store';
 
@@ -11,24 +11,26 @@ export interface ModelBenchmarkItem {
   id: string;
   provider: string;
   model_string: string;
-  livebench_hint?: string;
+  benchmark_hint?: string;
   role: string[];
   capabilities: any;
   tested_latency_ms?: number;
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
   tested_error?: string;
-  livebench_match: {
+  openrouter_match: {
     status: 'success' | 'fail';
+    matched_id?: string;
     matched_name?: string;
     score: number;
-    overall_score?: number;
-    reasoning_score?: number;
-    coding_score?: number;
-    math_score?: number;
-    language_score?: number;
-    if_score?: number;
-    data_analysis_score?: number;
-    context_window?: number;
+    intelligence_index?: number;
+    coding_index?: number;
+    agentic_index?: number;
+    context_length?: number;
+    pricing?: {
+      prompt: string;
+      completion: string;
+      input_cache_read?: string;
+    };
   };
 }
 
@@ -39,6 +41,9 @@ export async function GET(req: NextRequest) {
     const models = config.inference.models;
     const providers = config.inference.inference_providers;
     const provMap = new Map(providers.map((p) => [p.name, p]));
+
+    // Fetch live ratings from OpenRouter API
+    const orModels = await fetchOpenRouterModels();
 
     // Read cached benchmarks from Turso DB
     const cachedDbCards = await store.getCachedModelCards();
@@ -51,31 +56,30 @@ export async function GET(req: NextRequest) {
       const isEnabled = p?.enabled ?? false;
       const dbCard = dbCardMap.get(m.id);
 
-      // Fuzzy match against LiveBench
-      const lbMatch = fuzzyMatchLiveBench(m.id, m.livebench_hint || m.model_string);
+      // Match against OpenRouter models
+      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || (m as any).livebench_hint || m.id, orModels);
+      const aa = match.matched_model?.benchmarks?.artificial_analysis;
 
       const item: ModelBenchmarkItem = {
         id: m.id,
         provider: m.provider,
         model_string: m.model_string,
-        livebench_hint: m.livebench_hint,
+        benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
         role: m.role,
         capabilities: m.capabilities,
         tested_latency_ms: dbCard?.tested_latency_ms,
         tested_status: !isEnabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
         tested_error: dbCard?.tested_error,
-        livebench_match: {
-          status: lbMatch.status,
-          matched_name: lbMatch.matched_name,
-          score: lbMatch.score,
-          overall_score: lbMatch.metrics?.overall_score,
-          reasoning_score: lbMatch.metrics?.reasoning_score,
-          coding_score: lbMatch.metrics?.coding_score,
-          math_score: lbMatch.metrics?.math_score,
-          language_score: lbMatch.metrics?.language_score,
-          if_score: lbMatch.metrics?.if_score,
-          data_analysis_score: lbMatch.metrics?.data_analysis_score,
-          context_window: lbMatch.metrics?.context_window,
+        openrouter_match: {
+          status: match.status,
+          matched_id: match.matched_model?.id,
+          matched_name: match.matched_model?.name,
+          score: match.score,
+          intelligence_index: aa?.intelligence_index ?? dbCard?.intelligence_index,
+          coding_index: aa?.coding_index ?? dbCard?.coding_index,
+          agentic_index: aa?.agentic_index ?? dbCard?.agentic_index,
+          context_length: match.matched_model?.context_length ?? dbCard?.context_length,
+          pricing: match.matched_model?.pricing,
         },
       };
 
@@ -105,28 +109,33 @@ export async function POST(req: NextRequest) {
     const providers = config.inference.inference_providers;
     const provMap = new Map(providers.map((p) => [p.name, p]));
 
+    const orModels = await fetchOpenRouterModels();
     const benchmarkResults: ModelBenchmarkItem[] = [];
 
     for (const m of models) {
       const p = provMap.get(m.provider);
-      const lbMatch = fuzzyMatchLiveBench(m.id, m.livebench_hint || m.model_string);
+      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || (m as any).livebench_hint || m.id, orModels);
+      const aa = match.matched_model?.benchmarks?.artificial_analysis;
 
       if (!p || !p.enabled) {
         const item: ModelBenchmarkItem = {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          livebench_hint: m.livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
           role: m.role,
           capabilities: m.capabilities,
           tested_status: 'disabled',
-          livebench_match: {
-            status: lbMatch.status,
-            matched_name: lbMatch.matched_name,
-            score: lbMatch.score,
-            overall_score: lbMatch.metrics?.overall_score,
-            coding_score: lbMatch.metrics?.coding_score,
-            reasoning_score: lbMatch.metrics?.reasoning_score,
+          openrouter_match: {
+            status: match.status,
+            matched_id: match.matched_model?.id,
+            matched_name: match.matched_model?.name,
+            score: match.score,
+            intelligence_index: aa?.intelligence_index,
+            coding_index: aa?.coding_index,
+            agentic_index: aa?.agentic_index,
+            context_length: match.matched_model?.context_length,
+            pricing: match.matched_model?.pricing,
           },
         };
         benchmarkResults.push(item);
@@ -153,23 +162,21 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          livebench_hint: m.livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
           role: m.role,
           capabilities: m.capabilities,
           tested_latency_ms: elapsed,
           tested_status: 'ok',
-          livebench_match: {
-            status: lbMatch.status,
-            matched_name: lbMatch.matched_name,
-            score: lbMatch.score,
-            overall_score: lbMatch.metrics?.overall_score,
-            reasoning_score: lbMatch.metrics?.reasoning_score,
-            coding_score: lbMatch.metrics?.coding_score,
-            math_score: lbMatch.metrics?.math_score,
-            language_score: lbMatch.metrics?.language_score,
-            if_score: lbMatch.metrics?.if_score,
-            data_analysis_score: lbMatch.metrics?.data_analysis_score,
-            context_window: lbMatch.metrics?.context_window,
+          openrouter_match: {
+            status: match.status,
+            matched_id: match.matched_model?.id,
+            matched_name: match.matched_model?.name,
+            score: match.score,
+            intelligence_index: aa?.intelligence_index,
+            coding_index: aa?.coding_index,
+            agentic_index: aa?.agentic_index,
+            context_length: match.matched_model?.context_length,
+            pricing: match.matched_model?.pricing,
           },
         };
 
@@ -178,9 +185,12 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          livebench_score: lbMatch.metrics?.overall_score || 0,
-          livebench_name: lbMatch.matched_name || m.id,
-          match_status: lbMatch.status,
+          intelligence_index: aa?.intelligence_index,
+          coding_index: aa?.coding_index,
+          agentic_index: aa?.agentic_index,
+          openrouter_id: match.matched_model?.id,
+          context_length: match.matched_model?.context_length,
+          match_status: match.status,
           tested_latency_ms: elapsed,
           tested_status: 'ok',
           capabilities_json: JSON.stringify(m.capabilities),
@@ -194,24 +204,22 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          livebench_hint: m.livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
           role: m.role,
           capabilities: m.capabilities,
           tested_latency_ms: elapsed,
           tested_status: 'fail',
           tested_error: err.message,
-          livebench_match: {
-            status: lbMatch.status,
-            matched_name: lbMatch.matched_name,
-            score: lbMatch.score,
-            overall_score: lbMatch.metrics?.overall_score,
-            reasoning_score: lbMatch.metrics?.reasoning_score,
-            coding_score: lbMatch.metrics?.coding_score,
-            math_score: lbMatch.metrics?.math_score,
-            language_score: lbMatch.metrics?.language_score,
-            if_score: lbMatch.metrics?.if_score,
-            data_analysis_score: lbMatch.metrics?.data_analysis_score,
-            context_window: lbMatch.metrics?.context_window,
+          openrouter_match: {
+            status: match.status,
+            matched_id: match.matched_model?.id,
+            matched_name: match.matched_model?.name,
+            score: match.score,
+            intelligence_index: aa?.intelligence_index,
+            coding_index: aa?.coding_index,
+            agentic_index: aa?.agentic_index,
+            context_length: match.matched_model?.context_length,
+            pricing: match.matched_model?.pricing,
           },
         };
 
@@ -220,9 +228,12 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          livebench_score: lbMatch.metrics?.overall_score || 0,
-          livebench_name: lbMatch.matched_name || m.id,
-          match_status: lbMatch.status,
+          intelligence_index: aa?.intelligence_index,
+          coding_index: aa?.coding_index,
+          agentic_index: aa?.agentic_index,
+          openrouter_id: match.matched_model?.id,
+          context_length: match.matched_model?.context_length,
+          match_status: match.status,
           tested_latency_ms: elapsed,
           tested_status: 'fail',
           tested_error: err.message,

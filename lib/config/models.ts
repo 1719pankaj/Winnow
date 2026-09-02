@@ -88,6 +88,7 @@ export const ModelConfigSchema = z.object({
   model_string: z.string(),
   role: z.array(z.enum(['rerank', 'prefilter', 'plan', 'embed'])),
   capabilities: ModelCapabilitiesSchema,
+  benchmark_hint: z.string().optional(),
   livebench_hint: z.string().optional(),
   cost: z.string().default('free'),
 });

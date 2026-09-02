@@ -10,7 +10,7 @@
 - **Zero Python / 100% JS/TS**: Low memory footprint, fast cold starts, native streaming via Web Streams & Server-Sent Events (SSE).
 - **Config-Driven Modularity**: Add or modify search providers (`Serper`, `Tavily`, `SerpApi`) and inference providers (`Groq`, `Cerebras`, `Google Gemini`, `NVIDIA NIM`, `OpenRouter`) via YAML files without writing TypeScript code.
 - **Dynamic Speed vs Depth Slider**: Seamless volume-bar control transitioning from Ultra-Speed (`Cerebras`, `Groq`) to Deep Research (`Gemini 3.7 Flash High`, `DeepSeek V4 Pro`, `Nemotron 3 Ultra`).
-- **LiveBench Leaderboard Integration**: Contamination-free open benchmark intelligence scoring with automated local DB caching.
+- **OpenRouter Benchmark & Ratings Integration**: Evaluated intelligence, coding, and agentic metrics dynamically synced directly from OpenRouter's `/api/v1/models` API and cached in local Turso SQLite.
 - **Multi-Provider Fallback Resilience**: Automated failover across providers if rate limits or network issues arise.
 - **Two Tier Modes**:
   - **Fast Mode** (~1-4s): Rapid snippet evaluation with cosine prefiltering and listwise LLM reranking.

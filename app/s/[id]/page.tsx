@@ -358,7 +358,7 @@ export default function RunPage() {
                 flexShrink: 0,
                 transition: 'color 0.15s',
               }}
-              title="View all models and LiveBench scores"
+              title="View all models and OpenRouter ratings"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>

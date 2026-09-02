@@ -50,7 +50,7 @@ models:
       max_context: 1000000
       thinking_budget: 8192
       reasoning_effort: high
-    livebench_hint: "Google Gemini 3.7 Flash (High Thinking)"
+    benchmark_hint: "google/gemini-3.7-flash"
     cost: standard
 
   - id: gemini-3.7-flash-mid
@@ -64,7 +64,7 @@ models:
       max_context: 1000000
       thinking_budget: 4096
       reasoning_effort: medium
-    livebench_hint: "Google Gemini 3.7 Flash (Mid Thinking)"
+    benchmark_hint: "google/gemini-3.7-flash"
     cost: standard
 
   - id: gemini-3.7-flash-low
@@ -78,7 +78,7 @@ models:
       max_context: 1000000
       thinking_budget: 1024
       reasoning_effort: low
-    livebench_hint: "Google Gemini 3.7 Flash (Low Thinking)"
+    benchmark_hint: "google/gemini-3.7-flash"
     cost: standard
 
   - id: gemini-3.7-flash
@@ -90,7 +90,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 1000000
-    livebench_hint: "Google Gemini 3.7 Flash"
+    benchmark_hint: "google/gemini-3.7-flash"
     cost: standard
 
   - id: gemini-3.6-flash
@@ -102,7 +102,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 1000000
-    livebench_hint: "Google Gemini 3.6 Flash"
+    benchmark_hint: "google/gemini-3.6-flash"
     cost: standard
 
   - id: gemini-3.5-flash
@@ -114,7 +114,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 1000000
-    livebench_hint: "Google Gemini 3.5 Flash"
+    benchmark_hint: "google/gemini-3.5-flash-lite"
     cost: standard
 
   - id: gemini-3.1-flash-lite
@@ -126,7 +126,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 1000000
-    livebench_hint: "Google Gemini 3.1 Flash-Lite"
+    benchmark_hint: "google/gemini-3.1-flash-lite-preview"
     cost: standard
 
   - id: gemini-3-flash
@@ -138,7 +138,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 1000000
-    livebench_hint: "Google Gemini 3 Flash Preview"
+    benchmark_hint: "google/gemini-3-flash-preview"
     cost: standard
 
   - id: or-deepseek-v4-pro
@@ -150,7 +150,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 128000
-    livebench_hint: "DeepSeek V4 Pro 0813"
+    benchmark_hint: "deepseek/deepseek-v4-pro"
     cost: standard
 
   - id: nim-nemotron-3-ultra
@@ -162,7 +162,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "NVIDIA Nemotron 3 Ultra 550B"
+    benchmark_hint: "nvidia/nemotron-3-ultra-550b-a55b"
     cost: standard
 
   - id: or-glm-5-2
@@ -174,7 +174,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 128000
-    livebench_hint: "Zhipu GLM 5.2"
+    benchmark_hint: "z-ai/glm-5.2"
     cost: standard
 
   - id: or-laguna-s2-1
@@ -186,7 +186,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 128000
-    livebench_hint: "Poolside Laguna S 2.1"
+    benchmark_hint: "poolside/laguna-s-2.1"
     cost: standard
 
   - id: groq-gpt-120b
@@ -198,7 +198,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "GPT-OSS 120B on Groq LPU"
+    benchmark_hint: "openai/gpt-oss-120b"
     cost: standard
 
   - id: cerebras-gpt-120b
@@ -210,7 +210,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "GPT-OSS 120B on Cerebras CS-3"
+    benchmark_hint: "openai/gpt-oss-120b"
     cost: standard
 
   - id: cerebras-gemma4-31b
@@ -222,7 +222,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "Gemma 4 31B on Cerebras CS-3"
+    benchmark_hint: "google/gemma-4-31b-it"
     cost: standard
 
   - id: groq-qwen-27b
@@ -234,7 +234,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "Qwen 3.6 27B on Groq LPU"
+    benchmark_hint: "qwen/qwen3.6-27b"
     cost: standard
 
   - id: groq-gpt-20b
@@ -246,7 +246,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "GPT-OSS 20B on Groq LPU"
+    benchmark_hint: "openai/gpt-oss-20b"
     cost: standard
 
   # ================= Outdated / Legacy Section =================
@@ -259,7 +259,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 2000000
-    livebench_hint: "Google Gemini 3.1 Pro (Legacy)"
+    benchmark_hint: "google/gemini-3.1-pro-preview"
     cost: standard
 
   - id: nim-mistral-nemotron-legacy
@@ -271,7 +271,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 128000
-    livebench_hint: "Mistral Nemotron (Legacy)"
+    benchmark_hint: "mistralai/mistral-nemo"
     cost: standard
 
   - id: nim-nemotron-super-49b-legacy
@@ -283,7 +283,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    livebench_hint: "NVIDIA Nemotron Super 49B (Legacy)"
+    benchmark_hint: "nvidia/nemotron-3-super"
     cost: standard
 
   - id: or-gemma-4-26b-legacy
@@ -295,7 +295,7 @@ models:
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 262144
-    livebench_hint: "Google Gemma 4 26B (Legacy)"
+    benchmark_hint: "google/gemma-4-26b-a4b-it"
     cost: standard
 
   - id: or-dots-3-note-legacy
@@ -307,12 +307,12 @@ models:
       supports_parallel_tools: false
       supports_json_schema: false
       max_context: 128000
-    livebench_hint: "Dots 3 Note Preview (Legacy)"
+    benchmark_hint: "dots-studio/dots-3-note-preview:free"
     cost: free
 
 model_policy:
   fast:
-    rerank: {order_by: output_speed, min_intelligence: 50}
+    rerank: {order_by: output_speed, min_intelligence: 20}
     plan: {order_by: output_speed}
   right:
     rerank: {order_by: intelligence, min_speed_tps: 20}

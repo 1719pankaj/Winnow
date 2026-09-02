@@ -6,8 +6,11 @@ export interface CachedModelCard {
   id: string;
   provider: string;
   model_string: string;
-  livebench_score: number;
-  livebench_name: string;
+  intelligence_index?: number;
+  coding_index?: number;
+  agentic_index?: number;
+  openrouter_id?: string;
+  context_length?: number;
   match_status: 'success' | 'fail';
   tested_latency_ms?: number;
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
@@ -83,8 +86,11 @@ class WinnowStore {
         id TEXT PRIMARY KEY,
         provider TEXT,
         model_string TEXT,
-        livebench_score REAL,
-        livebench_name TEXT,
+        intelligence_index REAL,
+        coding_index REAL,
+        agentic_index REAL,
+        openrouter_id TEXT,
+        context_length INTEGER,
         match_status TEXT,
         tested_latency_ms REAL,
         tested_status TEXT,
@@ -105,8 +111,11 @@ class WinnowStore {
     const alterStatements = [
       `ALTER TABLE traces ADD COLUMN audit_json TEXT`,
       `ALTER TABLE model_cards ADD COLUMN model_string TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN livebench_score REAL`,
-      `ALTER TABLE model_cards ADD COLUMN livebench_name TEXT`,
+      `ALTER TABLE model_cards ADD COLUMN intelligence_index REAL`,
+      `ALTER TABLE model_cards ADD COLUMN coding_index REAL`,
+      `ALTER TABLE model_cards ADD COLUMN agentic_index REAL`,
+      `ALTER TABLE model_cards ADD COLUMN openrouter_id TEXT`,
+      `ALTER TABLE model_cards ADD COLUMN context_length INTEGER`,
       `ALTER TABLE model_cards ADD COLUMN match_status TEXT`,
       `ALTER TABLE model_cards ADD COLUMN tested_latency_ms REAL`,
       `ALTER TABLE model_cards ADD COLUMN tested_status TEXT`,
@@ -299,7 +308,7 @@ class WinnowStore {
   async getCachedModelCards(): Promise<CachedModelCard[]> {
     await this.init();
     const rs = await this.client.execute({
-      sql: 'SELECT * FROM model_cards ORDER BY livebench_score DESC',
+      sql: 'SELECT * FROM model_cards ORDER BY intelligence_index DESC',
       args: [],
     });
 
@@ -307,8 +316,11 @@ class WinnowStore {
       id: row.id,
       provider: row.provider,
       model_string: row.model_string || '',
-      livebench_score: row.livebench_score || 0,
-      livebench_name: row.livebench_name || '',
+      intelligence_index: row.intelligence_index !== null && row.intelligence_index !== undefined ? Number(row.intelligence_index) : undefined,
+      coding_index: row.coding_index !== null && row.coding_index !== undefined ? Number(row.coding_index) : undefined,
+      agentic_index: row.agentic_index !== null && row.agentic_index !== undefined ? Number(row.agentic_index) : undefined,
+      openrouter_id: row.openrouter_id || undefined,
+      context_length: row.context_length !== null && row.context_length !== undefined ? Number(row.context_length) : undefined,
       match_status: row.match_status || 'fail',
       tested_latency_ms: row.tested_latency_ms !== null && row.tested_latency_ms !== undefined ? Number(row.tested_latency_ms) : undefined,
       tested_status: row.tested_status || 'untested',
@@ -323,15 +335,18 @@ class WinnowStore {
     await this.client.execute({
       sql: `
         INSERT INTO model_cards (
-          id, provider, model_string, livebench_score, livebench_name,
-          match_status, tested_latency_ms, tested_status, tested_error,
-          capabilities_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, provider, model_string, intelligence_index, coding_index, agentic_index,
+          openrouter_id, context_length, match_status, tested_latency_ms,
+          tested_status, tested_error, capabilities_json, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           provider=excluded.provider,
           model_string=excluded.model_string,
-          livebench_score=excluded.livebench_score,
-          livebench_name=excluded.livebench_name,
+          intelligence_index=excluded.intelligence_index,
+          coding_index=excluded.coding_index,
+          agentic_index=excluded.agentic_index,
+          openrouter_id=excluded.openrouter_id,
+          context_length=excluded.context_length,
           match_status=excluded.match_status,
           tested_latency_ms=excluded.tested_latency_ms,
           tested_status=excluded.tested_status,
@@ -343,8 +358,11 @@ class WinnowStore {
         card.id,
         card.provider,
         card.model_string,
-        card.livebench_score,
-        card.livebench_name,
+        card.intelligence_index !== undefined ? card.intelligence_index : null,
+        card.coding_index !== undefined ? card.coding_index : null,
+        card.agentic_index !== undefined ? card.agentic_index : null,
+        card.openrouter_id || null,
+        card.context_length !== undefined ? card.context_length : null,
         card.match_status,
         card.tested_latency_ms !== undefined ? card.tested_latency_ms : null,
         card.tested_status,

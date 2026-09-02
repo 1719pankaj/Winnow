@@ -8,7 +8,7 @@ interface ActiveModelOption {
   id: string;
   label: string;
   provider: string;
-  livebenchScore: number;
+  intelligenceIndex: number;
 }
 
 export default function HomePage() {
@@ -22,7 +22,7 @@ export default function HomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Live/cached models loaded from DB
+  // Live/cached models loaded from DB & OpenRouter API
   const [modelItems, setModelItems] = useState<ModelBenchmarkItem[]>([]);
 
   useEffect(() => {
@@ -40,26 +40,26 @@ export default function HomePage() {
   const activeModels: ActiveModelOption[] = useMemo(() => {
     if (!modelItems || modelItems.length === 0) {
       return [
-        { id: 'cerebras-gemma4-31b', label: 'Cerebras Gemma 4 31B', provider: 'cerebras', livebenchScore: 63.5 },
-        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B', provider: 'groq', livebenchScore: 61.0 },
-        { id: 'groq-gpt-120b', label: 'Groq GPT-OSS 120B', provider: 'groq', livebenchScore: 67.2 },
-        { id: 'gemini-3.5-flash', label: 'Google Gemini 3.5 Flash', provider: 'gemini', livebenchScore: 72.4 },
-        { id: 'or-glm-5-2', label: 'Zhipu GLM 5.2', provider: 'openrouter', livebenchScore: 71.5 },
-        { id: 'or-laguna-s2-1', label: 'Poolside Laguna S 2.1', provider: 'openrouter', livebenchScore: 69.8 },
-        { id: 'gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'gemini', livebenchScore: 75.8 },
-        { id: 'nim-nemotron-3-ultra', label: 'NVIDIA Nemotron 3 Ultra 550B', provider: 'nim', livebenchScore: 74.6 },
-        { id: 'or-deepseek-v4-pro', label: 'DeepSeek V4 Pro 0813', provider: 'openrouter', livebenchScore: 77.4 },
-        { id: 'gemini-3.7-flash-high', label: 'Google Gemini 3.7 Flash (High Thinking)', provider: 'gemini', livebenchScore: 78.8 },
+        { id: 'cerebras-gemma4-31b', label: 'Cerebras Gemma 4 31B', provider: 'cerebras', intelligenceIndex: 29.7 },
+        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B', provider: 'groq', intelligenceIndex: 37.7 },
+        { id: 'groq-gpt-120b', label: 'Groq GPT-OSS 120B', provider: 'groq', intelligenceIndex: 24.1 },
+        { id: 'gemini-3.5-flash', label: 'Google Gemini 3.5 Flash', provider: 'gemini', intelligenceIndex: 37.4 },
+        { id: 'or-glm-5-2', label: 'Zhipu GLM 5.2', provider: 'openrouter', intelligenceIndex: 52.6 },
+        { id: 'or-laguna-s2-1', label: 'Poolside Laguna S 2.1', provider: 'openrouter', intelligenceIndex: 40.0 },
+        { id: 'gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'gemini', intelligenceIndex: 56.0 },
+        { id: 'nim-nemotron-3-ultra', label: 'NVIDIA Nemotron 3 Ultra 550B', provider: 'nim', intelligenceIndex: 38.3 },
+        { id: 'or-deepseek-v4-pro', label: 'DeepSeek V4 Pro 0813', provider: 'openrouter', intelligenceIndex: 45.3 },
+        { id: 'gemini-3.7-flash-high', label: 'Google Gemini 3.7 Flash (High Thinking)', provider: 'gemini', intelligenceIndex: 56.0 },
       ];
     }
 
     return modelItems
-      .filter((m) => !m.id.includes('legacy') && !(m.livebench_hint || '').toLowerCase().includes('legacy'))
+      .filter((m) => !m.id.includes('legacy') && !(m.benchmark_hint || '').toLowerCase().includes('legacy'))
       .map((m) => ({
         id: m.id,
-        label: m.livebench_hint || m.id,
+        label: m.benchmark_hint || m.id,
         provider: m.provider,
-        livebenchScore: m.livebench_match.overall_score || 65,
+        intelligenceIndex: m.openrouter_match.intelligence_index || 30.0,
       }));
   }, [modelItems]);
 
@@ -68,14 +68,14 @@ export default function HomePage() {
       const pA = a.provider === 'cerebras' ? 0 : a.provider === 'groq' ? 1 : 2;
       const pB = b.provider === 'cerebras' ? 0 : b.provider === 'groq' ? 1 : 2;
       if (pA !== pB) return pA - pB;
-      return a.livebenchScore - b.livebenchScore;
+      return a.intelligenceIndex - b.intelligenceIndex;
     });
   }, [activeModels]);
 
   const rightModels = useMemo(() => {
     return [...activeModels]
-      .filter((m) => m.livebenchScore >= 72 || m.id.includes('high') || m.id.includes('pro') || m.id.includes('ultra'))
-      .sort((a, b) => a.livebenchScore - b.livebenchScore);
+      .filter((m) => m.intelligenceIndex >= 38 || m.id.includes('high') || m.id.includes('pro') || m.id.includes('ultra'))
+      .sort((a, b) => a.intelligenceIndex - b.intelligenceIndex);
   }, [activeModels]);
 
   // Deep research threshold: >= 75%
@@ -150,7 +150,7 @@ export default function HomePage() {
 
   return (
     <div className="home-screen">
-      {/* Top-Right Models & Benchmarks Button */}
+      {/* Top-Right Models & Ratings Button */}
       <div style={{ position: 'fixed', top: '20px', right: '24px', zIndex: 50 }}>
         <a
           href="/models"
@@ -175,7 +175,7 @@ export default function HomePage() {
             <line x1="6" y1="6" x2="6.01" y2="6"></line>
             <line x1="6" y1="18" x2="6.01" y2="18"></line>
           </svg>
-          <span>Models & LiveBench</span>
+          <span>Models & Ratings</span>
         </a>
       </div>
 
@@ -337,33 +337,33 @@ export default function HomePage() {
                 >
                   <option value="auto">Auto: Default for {discreteTier.toUpperCase()}</option>
                   <optgroup label="Google Gemini">
-                    <option value="gemini-3.7-flash-high">Gemini 3.7 Flash (High Thinking)</option>
-                    <option value="gemini-3.7-flash-mid">Gemini 3.7 Flash (Mid Thinking)</option>
-                    <option value="gemini-3.7-flash-low">Gemini 3.7 Flash (Low Thinking)</option>
-                    <option value="gemini-3.7-flash">Gemini 3.7 Flash (Standard)</option>
-                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+                    <option value="gemini-3.7-flash-high">Gemini 3.7 Flash (High Thinking 56.0)</option>
+                    <option value="gemini-3.7-flash-mid">Gemini 3.7 Flash (Mid Thinking 56.0)</option>
+                    <option value="gemini-3.7-flash-low">Gemini 3.7 Flash (Low Thinking 56.0)</option>
+                    <option value="gemini-3.7-flash">Gemini 3.7 Flash (Standard 56.0)</option>
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash (51.6)</option>
+                    <option value="gemini-3.5-flash">Gemini 3.5 Flash (37.4)</option>
+                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (25.6)</option>
                     <option value="gemini-3-flash">Gemini 3 Flash Preview</option>
                   </optgroup>
                   <optgroup label="OpenRouter & NIM Frontier">
-                    <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813</option>
-                    <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B</option>
-                    <option value="or-glm-5-2">Zhipu GLM 5.2</option>
+                    <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813 (45.3)</option>
+                    <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B (38.3)</option>
+                    <option value="or-glm-5-2">Zhipu GLM 5.2 (52.6)</option>
                     <option value="or-laguna-s2-1">Poolside Laguna S 2.1</option>
                   </optgroup>
                   <optgroup label="Cerebras & Groq Ultra Speed">
                     <option value="cerebras-gemma4-31b">Cerebras Gemma 4 31B (2,420 tps)</option>
                     <option value="cerebras-gpt-120b">Cerebras GPT-OSS 120B (2,150 tps)</option>
-                    <option value="groq-gpt-120b">Groq GPT-OSS 120B (~350ms)</option>
-                    <option value="groq-qwen-27b">Groq Qwen 3.6 27B (~280ms)</option>
-                    <option value="groq-gpt-20b">Groq GPT-OSS 20B (~200ms)</option>
+                    <option value="groq-gpt-120b">Groq GPT-OSS 120B (24.1)</option>
+                    <option value="groq-qwen-27b">Groq Qwen 3.6 27B (37.7)</option>
+                    <option value="groq-gpt-20b">Groq GPT-OSS 20B (15.2)</option>
                   </optgroup>
                   <optgroup label="Legacy / Outdated">
                     <option value="gemini-3.1-pro-legacy">Gemini 3.1 Pro (Legacy)</option>
                     <option value="nim-mistral-nemotron-legacy">Mistral Nemotron (Legacy)</option>
-                    <option value="nim-nemotron-super-49b-legacy">Nemotron Super 49B (Legacy)</option>
-                    <option value="or-gemma-4-26b-legacy">Gemma 4 26B (Legacy)</option>
+                    <option value="nim-nemotron-super-49b-legacy">Nemotron Super 49B (25.7)</option>
+                    <option value="or-gemma-4-26b-legacy">Gemma 4 26B (26.1)</option>
                     <option value="or-dots-3-note-legacy">Dots 3 Note (Legacy)</option>
                   </optgroup>
                 </select>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadConfig } from '@/lib/config/loader';
 import { fetchOpenRouterModels, matchOpenRouterModel } from '@/lib/benchmarks';
-import { fetchGoogleGeminiModels } from '@/lib/gemini_catalog';
+import { fetchNimModels, fetchGroqModels, fetchGoogleGeminiModels } from '@/lib/provider_catalog';
 import { store } from '@/lib/store';
 
 export interface PingTrace {
@@ -70,21 +70,46 @@ export function classifyModelCategory(
 
   const str = (m.id + ' ' + m.model_string + ' ' + (m.benchmark_hint || '')).toLowerCase();
 
-  // 3. Auto-detect Incompatible Models (embedding, TTS, video/image, robotics)
-  if (str.includes('embedding')) {
-    return { category: 'incompatible', reason: 'Embedding-only model (no text generation endpoint)' };
+  // 3. Auto-detect Incompatible Models (embedding, audio/TTS, speech, video/image, guard models)
+  if (str.includes('embed') || str.includes('rerank')) {
+    return { category: 'incompatible', reason: 'Embedding / Reranker model (no chat completion endpoint)' };
   }
-  if (str.includes('tts') || str.includes('native-audio') || str.includes('transcribe-live')) {
-    return { category: 'incompatible', reason: 'Audio/TTS model (unsupported for text chat search)' };
+  if (
+    str.includes('tts') ||
+    str.includes('audio') ||
+    str.includes('whisper') ||
+    str.includes('parakeet') ||
+    str.includes('canary') ||
+    str.includes('riva')
+  ) {
+    return { category: 'incompatible', reason: 'Speech / Audio model (unsupported for text search)' };
   }
-  if (str.includes('veo') || str.includes('lyria') || str.includes('image-preview') || str.includes('flash-image')) {
-    return { category: 'incompatible', reason: 'Media/Video generator model' };
+  if (
+    str.includes('prompt-guard') ||
+    str.includes('safeguard') ||
+    str.includes('llama-guard') ||
+    str.includes('shield')
+  ) {
+    return { category: 'incompatible', reason: 'Safety moderation / Guard model' };
   }
-  if (str.includes('robotics')) {
-    return { category: 'incompatible', reason: 'Specialized Robotics model' };
+  if (
+    str.includes('veo') ||
+    str.includes('lyria') ||
+    str.includes('image-preview') ||
+    str.includes('flash-image') ||
+    str.includes('diffusion') ||
+    str.includes('sdxl') ||
+    str.includes('flux') ||
+    str.includes('fuyu') ||
+    str.includes('kosmos')
+  ) {
+    return { category: 'incompatible', reason: 'Media / Diffusion generator model' };
+  }
+  if (str.includes('robotics') || str.includes('deplot') || str.includes('neva')) {
+    return { category: 'incompatible', reason: 'Specialized vision / robotics model' };
   }
   if (str.includes('customtools') || str.includes('aqa')) {
-    return { category: 'incompatible', reason: 'Specialized custom tool / QA interface' };
+    return { category: 'incompatible', reason: 'Specialized QA / custom tool interface' };
   }
 
   // 4. Auto-detect Outdated / Legacy Models
@@ -93,11 +118,15 @@ export function classifyModelCategory(
     str.includes('gemini-2.5') ||
     str.includes('gemini-2.0') ||
     str.includes('gemini-1.5') ||
+    str.includes('llama-2') ||
+    str.includes('gemma-2b') ||
+    str.includes('codellama') ||
+    str.includes('yi-large') ||
     str.includes('preview-09') ||
     str.includes('preview-10') ||
     str.includes('preview-12-2025')
   ) {
-    return { category: 'outdated', reason: 'Deprecated or legacy model architecture' };
+    return { category: 'outdated', reason: 'Deprecated architecture or legacy baseline' };
   }
 
   // 5. Default Active
@@ -321,13 +350,18 @@ export async function GET(req: NextRequest) {
     const models = config.inference.models;
     const providers = config.inference.inference_providers;
     const provMap = new Map(providers.map((p) => [p.name, p]));
+
     const geminiProvider = provMap.get('gemini');
+    const nimProvider = provMap.get('nim');
+    const groqProvider = provMap.get('groq');
 
-    // Fetch live ratings from OpenRouter API
-    const orModels = await fetchOpenRouterModels();
-
-    // Fetch live models from Google Gemini API
-    const googleModels = await fetchGoogleGeminiModels(geminiProvider?.api_key);
+    // Fetch live ratings & models from OpenRouter, Google Gemini, NVIDIA NIM, and Groq concurrently
+    const [orModels, googleModels, nimModels, groqModels] = await Promise.all([
+      fetchOpenRouterModels(),
+      fetchGoogleGeminiModels(geminiProvider?.api_key),
+      fetchNimModels(nimProvider?.api_key),
+      fetchGroqModels(groqProvider?.api_key),
+    ]);
 
     // Read cached benchmarks from Turso DB
     const cachedDbCards = await store.getCachedModelCards();
@@ -379,7 +413,107 @@ export async function GET(req: NextRequest) {
       items.push(item);
     }
 
-    // 2. Auto-catalog all live Google Gemini models from Google AI Studio API
+    // 2. Auto-catalog all live NVIDIA NIM models (80+ models)
+    for (const nm of nimModels) {
+      const rawModelString = nm.id;
+      const customId = `nim-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+      if (seenIds.has(customId) || seenIds.has(rawModelString)) continue;
+      seenIds.add(customId);
+      seenIds.add(rawModelString);
+
+      const dbCard = dbCardMap.get(customId);
+      const match = matchOpenRouterModel(customId, rawModelString, rawModelString, orModels);
+      const aa = match.matched_model?.benchmarks?.artificial_analysis;
+      const classification = classifyModelCategory(
+        { id: customId, provider: 'nim', model_string: rawModelString },
+        dbCard?.status_override,
+        nimProvider?.enabled ?? false
+      );
+
+      items.push({
+        id: customId,
+        provider: 'nim',
+        model_string: rawModelString,
+        benchmark_hint: rawModelString,
+        role: ['rerank', 'plan'],
+        capabilities: {
+          supports_tools: true,
+          supports_json_schema: true,
+          max_context: 131072,
+        },
+        time_per_task_s: estimateTimePerTask({ provider: 'nim', id: rawModelString }, match),
+        tested_latency_ms: dbCard?.tested_latency_ms,
+        tested_status: !nimProvider?.enabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
+        tested_error: dbCard?.tested_error,
+        status_override: dbCard?.status_override,
+        category: classification.category,
+        incompatible_reason: classification.reason,
+        openrouter_match: {
+          status: match.status,
+          matched_id: match.matched_model?.id,
+          matched_name: match.matched_model?.name,
+          score: match.score,
+          intelligence_index: aa?.intelligence_index ?? dbCard?.intelligence_index,
+          coding_index: aa?.coding_index ?? dbCard?.coding_index,
+          agentic_index: aa?.agentic_index ?? dbCard?.agentic_index,
+          context_length: match.matched_model?.context_length ?? dbCard?.context_length ?? 131072,
+          pricing: match.matched_model?.pricing,
+        },
+      });
+    }
+
+    // 3. Auto-catalog all live Groq models (14+ models)
+    for (const gm of groqModels) {
+      const rawModelString = gm.id;
+      const customId = `groq-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+      if (seenIds.has(customId) || seenIds.has(rawModelString)) continue;
+      seenIds.add(customId);
+      seenIds.add(rawModelString);
+
+      const dbCard = dbCardMap.get(customId);
+      const match = matchOpenRouterModel(customId, rawModelString, rawModelString, orModels);
+      const aa = match.matched_model?.benchmarks?.artificial_analysis;
+      const classification = classifyModelCategory(
+        { id: customId, provider: 'groq', model_string: rawModelString },
+        dbCard?.status_override,
+        groqProvider?.enabled ?? false
+      );
+
+      items.push({
+        id: customId,
+        provider: 'groq',
+        model_string: rawModelString,
+        benchmark_hint: rawModelString,
+        role: ['rerank', 'plan'],
+        capabilities: {
+          supports_tools: true,
+          supports_json_schema: true,
+          max_context: gm.context_window || 131072,
+        },
+        time_per_task_s: estimateTimePerTask({ provider: 'groq', id: rawModelString }, match),
+        tested_latency_ms: dbCard?.tested_latency_ms,
+        tested_status: !groqProvider?.enabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
+        tested_error: dbCard?.tested_error,
+        status_override: dbCard?.status_override,
+        category: classification.category,
+        incompatible_reason: classification.reason,
+        openrouter_match: {
+          status: match.status,
+          matched_id: match.matched_model?.id,
+          matched_name: match.matched_model?.name,
+          score: match.score,
+          intelligence_index: aa?.intelligence_index ?? dbCard?.intelligence_index,
+          coding_index: aa?.coding_index ?? dbCard?.coding_index,
+          agentic_index: aa?.agentic_index ?? dbCard?.agentic_index,
+          context_length: gm.context_window || (match.matched_model?.context_length ?? dbCard?.context_length) || 131072,
+          pricing: match.matched_model?.pricing,
+        },
+      });
+    }
+
+    // 4. Auto-catalog all live Google Gemini models (40+ models)
     for (const gm of googleModels) {
       const rawModelString = gm.name.replace(/^models\//, '');
       const customId = `gemini-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -450,15 +584,53 @@ export async function POST(req: NextRequest) {
 
     const providers = config.inference.inference_providers;
     const provMap = new Map(providers.map((p) => [p.name, p]));
-    const geminiProvider = provMap.get('gemini');
 
-    const orModels = await fetchOpenRouterModels();
-    const googleModels = await fetchGoogleGeminiModels(geminiProvider?.api_key);
+    const geminiProvider = provMap.get('gemini');
+    const nimProvider = provMap.get('nim');
+    const groqProvider = provMap.get('groq');
+
+    const [orModels, googleModels, nimModels, groqModels] = await Promise.all([
+      fetchOpenRouterModels(),
+      fetchGoogleGeminiModels(geminiProvider?.api_key),
+      fetchNimModels(nimProvider?.api_key),
+      fetchGroqModels(groqProvider?.api_key),
+    ]);
+
     const cachedDbCards = await store.getCachedModelCards();
     const dbCardMap = new Map(cachedDbCards.map((c) => [c.id, c]));
 
-    // Build complete pool of models (configured + auto-discovered Gemini)
+    // Build complete pool of models across all providers
     const allModels: any[] = [...config.inference.models];
+
+    // Add NIM models
+    for (const nm of nimModels) {
+      const rawModelString = nm.id;
+      const customId = `nim-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      allModels.push({
+        id: customId,
+        provider: 'nim',
+        model_string: rawModelString,
+        benchmark_hint: rawModelString,
+        role: ['rerank', 'plan'],
+        capabilities: { max_context: 131072 },
+      });
+    }
+
+    // Add Groq models
+    for (const gm of groqModels) {
+      const rawModelString = gm.id;
+      const customId = `groq-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      allModels.push({
+        id: customId,
+        provider: 'groq',
+        model_string: rawModelString,
+        benchmark_hint: rawModelString,
+        role: ['rerank', 'plan'],
+        capabilities: { max_context: gm.context_window || 131072 },
+      });
+    }
+
+    // Add Gemini models
     for (const gm of googleModels) {
       const rawModelString = gm.name.replace(/^models\//, '');
       const customId = `gemini-live-${rawModelString.replace(/[^a-zA-Z0-9_-]/g, '-')}`;

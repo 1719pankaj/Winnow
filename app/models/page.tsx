@@ -6,6 +6,41 @@ import { ModelBenchmarkItem, PingTrace } from '../api/admin/models/route';
 type SortKey = 'name' | 'provider' | 'time_per_task' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
 type SortOrder = 'asc' | 'desc';
 
+function formatModelOutput(trace?: PingTrace): string {
+  if (!trace) return '"OK"';
+  if (trace.error) return trace.error;
+
+  const body = trace.response_body;
+  if (body) {
+    // 1. Standard OpenAI message content
+    const choice = body.choices?.[0];
+    if (choice?.message?.content && typeof choice.message.content === 'string' && choice.message.content.trim()) {
+      return choice.message.content;
+    }
+    // 2. OpenAI reasoning content (e.g. DeepSeek / GLM)
+    if (choice?.message?.reasoning && typeof choice.message.reasoning === 'string') {
+      return `[Reasoning Output]:\n${choice.message.reasoning}`;
+    }
+    // 3. Gemini candidate text
+    const candidateText = body.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (candidateText && typeof candidateText === 'string') {
+      return candidateText;
+    }
+    // 4. Pretty print parsed JSON
+    return JSON.stringify(body, null, 2);
+  }
+
+  if (trace.response_raw_text) {
+    try {
+      return JSON.stringify(JSON.parse(trace.response_raw_text), null, 2);
+    } catch {
+      return trace.response_raw_text;
+    }
+  }
+
+  return '"OK"';
+}
+
 export default function ModelsBenchmarkPage() {
   const [models, setModels] = useState<ModelBenchmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -286,7 +321,7 @@ export default function ModelsBenchmarkPage() {
               }}
               title="Fetch latest active and free models directly from OpenRouter API"
             >
-              <svg className={syncingCatalog ? 'spin-animate' : ''} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg className={syncingCatalog ? 'spin-animate' : ''} style={syncingCatalog ? { animation: 'spin 0.8s linear infinite' } : {}} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
                 <polyline points="1 20 1 14 7 14"></polyline>
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -317,7 +352,7 @@ export default function ModelsBenchmarkPage() {
             >
               {benchmarkingAll ? (
                 <>
-                  <svg className="spin-animate" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                   </svg>
                   <span>Pinging All...</span>
@@ -712,7 +747,7 @@ export default function ModelsBenchmarkPage() {
                         >
                           {isTesting ? (
                             <>
-                              <svg className="spin-animate" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
+                              <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                               </svg>
                               <span>Pinging...</span>
@@ -845,7 +880,7 @@ export default function ModelsBenchmarkPage() {
                           >
                             {isTesting ? (
                               <>
-                                <svg className="spin-animate" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                   <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                                 </svg>
                                 <span>...</span>
@@ -878,6 +913,7 @@ export default function ModelsBenchmarkPage() {
             justifyContent: 'center',
             zIndex: 100,
             padding: '24px',
+            boxSizing: 'border-box',
           }}
           onClick={() => {
             if (!activeTraceModal.isPinging) setActiveTraceModal(null);
@@ -895,6 +931,7 @@ export default function ModelsBenchmarkPage() {
               flexDirection: 'column',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
               overflow: 'hidden',
+              boxSizing: 'border-box',
               color: '#f4f4f5',
             }}
             onClick={(e) => e.stopPropagation()}
@@ -908,9 +945,11 @@ export default function ModelsBenchmarkPage() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 background: '#18181b',
+                boxSizing: 'border-box',
+                flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                 <div
                   style={{
                     width: '28px',
@@ -920,6 +959,7 @@ export default function ModelsBenchmarkPage() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -927,8 +967,8 @@ export default function ModelsBenchmarkPage() {
                     <line x1="12" y1="19" x2="20" y2="19"></line>
                   </svg>
                 </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: '#ffffff' }}>
                       {activeTraceModal.model.benchmark_hint || activeTraceModal.model.id}
                     </span>
@@ -946,13 +986,13 @@ export default function ModelsBenchmarkPage() {
                       {activeTraceModal.model.provider}
                     </span>
                   </div>
-                  <div className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
+                  <div className="mono" style={{ fontSize: '11px', color: '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {activeTraceModal.model.model_string}
                   </div>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                 {/* Re-Ping Button */}
                 <button
                   type="button"
@@ -973,7 +1013,7 @@ export default function ModelsBenchmarkPage() {
                   }}
                 >
                   {activeTraceModal.isPinging ? (
-                    <svg className="spin-animate" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                     </svg>
                   ) : (
@@ -1014,6 +1054,8 @@ export default function ModelsBenchmarkPage() {
                 padding: '8px 20px',
                 borderBottom: '1px solid #27272a',
                 background: '#121215',
+                boxSizing: 'border-box',
+                flexShrink: 0,
               }}
             >
               {[
@@ -1043,10 +1085,10 @@ export default function ModelsBenchmarkPage() {
             </div>
 
             {/* Modal Body */}
-            <div style={{ padding: '20px', overflowY: 'auto', flex: 1, maxHeight: 'calc(90vh - 160px)' }}>
+            <div style={{ padding: '20px', overflowY: 'auto', overflowX: 'hidden', flex: 1, maxHeight: 'calc(90vh - 160px)', boxSizing: 'border-box' }}>
               {activeTraceModal.isPinging ? (
                 <div style={{ textAlign: 'center', padding: '48px 20px' }}>
-                  <svg className="spin-animate" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" style={{ margin: '0 auto 16px auto' }}>
+                  <svg className="spin-animate" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" style={{ margin: '0 auto 16px auto', animation: 'spin 0.8s linear infinite' }}>
                     <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                   </svg>
                   <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
@@ -1078,23 +1120,25 @@ export default function ModelsBenchmarkPage() {
                   </button>
                 </div>
               ) : (
-                <div>
+                <div style={{ boxSizing: 'border-box', width: '100%', minWidth: 0 }}>
                   {/* TAB 1: SUMMARY */}
                   {activeTraceModal.activeTab === 'summary' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
                       {/* Metric Summary Bar */}
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'repeat(4, 1fr)',
+                          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
                           gap: '12px',
                           background: '#18181b',
                           padding: '12px 16px',
                           borderRadius: 'var(--radius-lg)',
                           border: '1px solid #27272a',
+                          boxSizing: 'border-box',
+                          width: '100%',
                         }}
                       >
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
                             HTTP STATUS
                           </div>
@@ -1104,13 +1148,16 @@ export default function ModelsBenchmarkPage() {
                               fontWeight: 700,
                               marginTop: '2px',
                               color: activeTraceModal.trace.response_status >= 200 && activeTraceModal.trace.response_status < 300 ? '#22c55e' : '#ef4444',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             {activeTraceModal.trace.response_status ? `${activeTraceModal.trace.response_status} ${activeTraceModal.trace.response_status_text}` : 'Connection Failed'}
                           </div>
                         </div>
 
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
                             ROUNDTRIP PING
                           </div>
@@ -1119,7 +1166,7 @@ export default function ModelsBenchmarkPage() {
                           </div>
                         </div>
 
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
                             TASK LATENCY (AA)
                           </div>
@@ -1128,23 +1175,26 @@ export default function ModelsBenchmarkPage() {
                           </div>
                         </div>
 
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
                             METHOD & TARGET
                           </div>
-                          <div className="mono" style={{ fontSize: '11px', color: '#e4e4e7', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <div className="mono" style={{ fontSize: '11px', color: '#e4e4e7', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {activeTraceModal.trace.method} {activeTraceModal.model.provider}
                           </div>
                         </div>
                       </div>
 
-                      {/* Literal Model Output Display */}
+                      {/* Model Output Display */}
                       <div
                         style={{
                           background: '#18181b',
                           border: '1px solid #27272a',
                           borderRadius: 'var(--radius-lg)',
                           padding: '14px 16px',
+                          boxSizing: 'border-box',
+                          width: '100%',
+                          minWidth: 0,
                         }}
                       >
                         <div style={{ fontSize: '11px', fontWeight: 700, color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1153,25 +1203,51 @@ export default function ModelsBenchmarkPage() {
                         </div>
 
                         {activeTraceModal.trace.error ? (
-                          <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 'var(--radius-md)', padding: '12px', color: '#fca5a5', fontSize: '12px' }}>
+                          <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 'var(--radius-md)', padding: '12px', color: '#fca5a5', fontSize: '12px', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                             <strong>Error:</strong> {activeTraceModal.trace.error}
                           </div>
                         ) : (
-                          <div className="mono" style={{ background: '#09090b', padding: '12px', borderRadius: 'var(--radius-md)', fontSize: '13px', color: '#22c55e', border: '1px solid #27272a' }}>
-                            {activeTraceModal.trace.response_body?.choices?.[0]?.message?.content ||
-                              activeTraceModal.trace.response_body?.candidates?.[0]?.content?.parts?.[0]?.text ||
-                              activeTraceModal.trace.response_raw_text ||
-                              '"OK"'}
-                          </div>
+                          <pre
+                            className="mono"
+                            style={{
+                              background: '#09090b',
+                              padding: '12px 14px',
+                              borderRadius: 'var(--radius-md)',
+                              fontSize: '12px',
+                              color: '#22c55e',
+                              border: '1px solid #27272a',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              overflowWrap: 'anywhere',
+                              maxHeight: '260px',
+                              overflowY: 'auto',
+                              lineHeight: '1.5',
+                              margin: 0,
+                            }}
+                          >
+                            {formatModelOutput(activeTraceModal.trace)}
+                          </pre>
                         )}
                       </div>
 
                       {/* Endpoint URL */}
-                      <div>
+                      <div style={{ width: '100%', minWidth: 0 }}>
                         <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700, marginBottom: '4px' }}>
                           TARGET URL
                         </div>
-                        <div className="mono" style={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: '11px', color: '#38bdf8' }}>
+                        <div
+                          className="mono"
+                          style={{
+                            background: '#18181b',
+                            border: '1px solid #27272a',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '8px 12px',
+                            fontSize: '11px',
+                            color: '#38bdf8',
+                            wordBreak: 'break-all',
+                            overflowWrap: 'anywhere',
+                          }}
+                        >
                           {activeTraceModal.trace.endpoint_url}
                         </div>
                       </div>
@@ -1180,7 +1256,7 @@ export default function ModelsBenchmarkPage() {
 
                   {/* TAB 2: REQUEST PAYLOAD */}
                   {activeTraceModal.activeTab === 'request' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: 600 }}>
                           Exact HTTP Request Body Sent:
@@ -1211,7 +1287,12 @@ export default function ModelsBenchmarkPage() {
                           padding: '12px',
                           fontSize: '11px',
                           color: '#e4e4e7',
-                          overflowX: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          maxHeight: '300px',
+                          overflowY: 'auto',
+                          margin: 0,
                         }}
                       >
                         {JSON.stringify(activeTraceModal.trace.request_body, null, 2)}
@@ -1229,7 +1310,12 @@ export default function ModelsBenchmarkPage() {
                           padding: '12px',
                           fontSize: '11px',
                           color: '#a1a1aa',
-                          overflowX: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          margin: 0,
                         }}
                       >
                         {JSON.stringify(activeTraceModal.trace.request_headers, null, 2)}
@@ -1239,7 +1325,7 @@ export default function ModelsBenchmarkPage() {
 
                   {/* TAB 3: RAW RESPONSE */}
                   {activeTraceModal.activeTab === 'response' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: 600 }}>
                           Exact HTTP Response Body Received:
@@ -1270,7 +1356,12 @@ export default function ModelsBenchmarkPage() {
                           padding: '12px',
                           fontSize: '11px',
                           color: '#e4e4e7',
-                          overflowX: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          maxHeight: '360px',
+                          overflowY: 'auto',
+                          margin: 0,
                         }}
                       >
                         {activeTraceModal.trace.response_body

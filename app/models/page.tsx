@@ -50,7 +50,11 @@ export default function ModelsBenchmarkPage() {
   const [selectedProvider, setSelectedProvider] = useState<string>('all');
   const [filterFreeOnly, setFilterFreeOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
-  const [showOutdated, setShowOutdated] = useState(true);
+
+  // Collapsible section toggles
+  const [showOutdated, setShowOutdated] = useState(false);
+  const [showIncompatible, setShowIncompatible] = useState(false);
+  const [showDisabled, setShowDisabled] = useState(false);
 
   // Inspector Modal State
   const [activeTraceModal, setActiveTraceModal] = useState<{
@@ -86,7 +90,7 @@ export default function ModelsBenchmarkPage() {
     fetchModels();
   }, []);
 
-  // Sync live catalog directly with OpenRouter API
+  // Sync live catalog directly with OpenRouter and Google Gemini API
   const handleSyncCatalog = async () => {
     try {
       setSyncingCatalog(true);
@@ -118,6 +122,32 @@ export default function ModelsBenchmarkPage() {
       console.error(err);
     } finally {
       setBenchmarkingAll(false);
+    }
+  };
+
+  // Update Model Status Override (Active, Outdated, Incompatible, Disabled)
+  const handleUpdateStatus = async (
+    model: ModelBenchmarkItem,
+    newStatus: 'active' | 'outdated' | 'incompatible' | 'disabled'
+  ) => {
+    try {
+      // Optimistic update
+      setModels((prev) =>
+        prev.map((m) => (m.id === model.id ? { ...m, category: newStatus, status_override: newStatus } : m))
+      );
+
+      const res = await fetch('/api/admin/models/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: model.id, status: newStatus }),
+      });
+
+      if (!res.ok) {
+        await fetchModels();
+      }
+    } catch (err) {
+      console.error(err);
+      await fetchModels();
     }
   };
 
@@ -161,10 +191,6 @@ export default function ModelsBenchmarkPage() {
     } finally {
       setTestingModelId(null);
     }
-  };
-
-  const isModelOutdated = (m: ModelBenchmarkItem) => {
-    return m.id.includes('legacy') || (m.benchmark_hint || '').toLowerCase().includes('legacy');
   };
 
   const isModelFree = (m: ModelBenchmarkItem) => {
@@ -252,12 +278,21 @@ export default function ModelsBenchmarkPage() {
     });
   }, [models, selectedProvider, filterFreeOnly, searchFilter]);
 
+  // Split into 4 clean sections
   const activeModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => !isModelOutdated(m)));
+    return sortModels(filteredModels.filter((m) => m.category === 'active'));
   }, [filteredModels, sortKey, sortOrder]);
 
   const outdatedModels = useMemo(() => {
-    return sortModels(filteredModels.filter((m) => isModelOutdated(m)));
+    return sortModels(filteredModels.filter((m) => m.category === 'outdated'));
+  }, [filteredModels, sortKey, sortOrder]);
+
+  const incompatibleModels = useMemo(() => {
+    return sortModels(filteredModels.filter((m) => m.category === 'incompatible'));
+  }, [filteredModels, sortKey, sortOrder]);
+
+  const disabledModels = useMemo(() => {
+    return sortModels(filteredModels.filter((m) => m.category === 'disabled'));
   }, [filteredModels, sortKey, sortOrder]);
 
   const renderSortIndicator = (key: SortKey) => {
@@ -277,6 +312,307 @@ export default function ModelsBenchmarkPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // Reusable Model Table Renderer
+  const renderModelTable = (
+    list: ModelBenchmarkItem[],
+    tableType: 'active' | 'outdated' | 'incompatible' | 'disabled'
+  ) => {
+    return (
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+          <thead>
+            <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
+              <th onClick={() => handleHeaderSort('name')} style={{ padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}>
+                MODEL & ID {renderSortIndicator('name')}
+              </th>
+              <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '100px', cursor: 'pointer', userSelect: 'none' }}>
+                PROVIDER {renderSortIndicator('provider')}
+              </th>
+              <th onClick={() => handleHeaderSort('time_per_task')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
+                TIME / TASK {renderSortIndicator('time_per_task')}
+              </th>
+              <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
+                PING RESULT {renderSortIndicator('tested_latency')}
+              </th>
+              <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                INTELLIGENCE {renderSortIndicator('intelligence_index')}
+              </th>
+              <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
+                CODING {renderSortIndicator('coding_index')}
+              </th>
+              <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '80px', cursor: 'pointer', userSelect: 'none' }}>
+                AGENTIC {renderSortIndicator('agentic_index')}
+              </th>
+              <th style={{ padding: '10px 16px', width: '140px' }}>STATUS & FLAG</th>
+              <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((m) => {
+              const orMatch = m.openrouter_match;
+              const isTesting = testingModelId === m.id;
+              const free = isModelFree(m);
+
+              return (
+                <tr
+                  key={m.id}
+                  style={{
+                    borderBottom: '1px solid var(--border)',
+                    transition: 'background 0.15s',
+                    opacity: tableType === 'disabled' ? 0.6 : tableType === 'incompatible' ? 0.75 : 1,
+                  }}
+                >
+                  {/* Model & ID */}
+                  <td style={{ padding: '10px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '12px' }}>
+                        {m.benchmark_hint || m.id}
+                      </span>
+                      {free && (
+                        <span
+                          style={{
+                            padding: '1px 5px',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            background: '#f0fdf4',
+                            color: '#16a34a',
+                            border: '1px solid #bbf7d0',
+                          }}
+                        >
+                          FREE
+                        </span>
+                      )}
+                    </div>
+                    <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
+                      {m.model_string}
+                    </div>
+                    {m.incompatible_reason && (
+                      <div style={{ fontSize: '10px', color: '#e11d48', marginTop: '2px' }}>
+                        ⓘ {m.incompatible_reason}
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Provider Badge */}
+                  <td style={{ padding: '10px 16px' }}>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '2px 6px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        background:
+                          m.provider === 'groq'
+                            ? '#fff7ed'
+                            : m.provider === 'gemini'
+                            ? '#eff6ff'
+                            : m.provider === 'nim'
+                            ? '#f0fdf4'
+                            : '#faf5ff',
+                        color:
+                          m.provider === 'groq'
+                            ? '#ea580c'
+                            : m.provider === 'gemini'
+                            ? '#2563eb'
+                            : m.provider === 'nim'
+                            ? '#16a34a'
+                            : '#9333ea',
+                        border: `1px solid ${
+                          m.provider === 'groq'
+                            ? '#fed7aa'
+                            : m.provider === 'gemini'
+                            ? '#bfdbfe'
+                            : m.provider === 'nim'
+                            ? '#bbf7d0'
+                            : '#e9d5ff'
+                        }`,
+                      }}
+                    >
+                      {m.provider}
+                    </span>
+                  </td>
+
+                  {/* Time Per Task */}
+                  <td style={{ padding: '10px 16px' }}>
+                    <span
+                      className="mono"
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '11px',
+                        color: m.time_per_task_s < 0.5 ? '#16a34a' : m.time_per_task_s < 1.5 ? '#0284c7' : 'var(--foreground)',
+                      }}
+                    >
+                      ~{m.time_per_task_s}s
+                    </span>
+                  </td>
+
+                  {/* Ping Result */}
+                  <td style={{ padding: '10px 16px' }}>
+                    {m.tested_status === 'ok' ? (
+                      <div
+                        onClick={() => {
+                          setActiveTraceModal({
+                            model: m,
+                            trace: m.ping_trace,
+                            isPinging: false,
+                            activeTab: 'summary',
+                          });
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                        title="Click to inspect raw ping trace"
+                      >
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
+                        <span className="mono" style={{ fontWeight: 600, color: '#16a34a', textDecoration: 'underline', textUnderlineOffset: '2px', fontSize: '11px' }}>
+                          ✓ {m.tested_latency_ms} ms
+                        </span>
+                      </div>
+                    ) : m.tested_status === 'fail' ? (
+                      <div
+                        onClick={() => {
+                          setActiveTraceModal({
+                            model: m,
+                            trace: m.ping_trace,
+                            isPinging: false,
+                            activeTab: 'summary',
+                          });
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                        title={m.tested_error || 'Click to inspect error trace'}
+                      >
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
+                        <span style={{ color: '#ef4444', fontSize: '10px', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+                          ✗ Failed
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>Untested</span>
+                    )}
+                  </td>
+
+                  {/* OpenRouter Intelligence Index */}
+                  <td style={{ padding: '10px 16px' }}>
+                    {orMatch.intelligence_index !== undefined ? (
+                      <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: '#0284c7' }}>
+                        {orMatch.intelligence_index.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
+                    )}
+                  </td>
+
+                  {/* Coding Index */}
+                  <td style={{ padding: '10px 16px' }}>
+                    {orMatch.coding_index !== undefined ? (
+                      <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#16a34a' }}>
+                        {orMatch.coding_index.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
+                    )}
+                  </td>
+
+                  {/* Agentic Index */}
+                  <td style={{ padding: '10px 16px' }}>
+                    {orMatch.agentic_index !== undefined ? (
+                      <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: '#9333ea' }}>
+                        {orMatch.agentic_index.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--muted-foreground)', fontSize: '10px' }}>—</span>
+                    )}
+                  </td>
+
+                  {/* Interactive Status Switcher (Flagging) */}
+                  <td style={{ padding: '10px 16px' }}>
+                    <select
+                      value={m.category}
+                      onChange={(e) => handleUpdateStatus(m, e.target.value as any)}
+                      style={{
+                        background:
+                          m.category === 'active'
+                            ? '#f0fdf4'
+                            : m.category === 'outdated'
+                            ? '#fffbeb'
+                            : m.category === 'incompatible'
+                            ? '#fff1f2'
+                            : '#f4f4f5',
+                        color:
+                          m.category === 'active'
+                            ? '#16a34a'
+                            : m.category === 'outdated'
+                            ? '#b45309'
+                            : m.category === 'incompatible'
+                            ? '#e11d48'
+                            : '#71717a',
+                        border: `1px solid ${
+                          m.category === 'active'
+                            ? '#bbf7d0'
+                            : m.category === 'outdated'
+                            ? '#fde68a'
+                            : m.category === 'incompatible'
+                            ? '#fecdd3'
+                            : '#e4e4e7'
+                        }`,
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '3px 6px',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        outline: 'none',
+                      }}
+                      title="Change model status"
+                    >
+                      <option value="active">✓ Active</option>
+                      <option value="outdated">⏳ Outdated</option>
+                      <option value="incompatible">⚠️ Incompatible</option>
+                      <option value="disabled">🚫 Disabled</option>
+                    </select>
+                  </td>
+
+                  {/* Ping Action */}
+                  <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                    <button
+                      onClick={() => handleTestSingleModel(m)}
+                      disabled={isTesting || benchmarkingAll}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: isTesting ? 'var(--primary)' : 'var(--card)',
+                        color: isTesting ? 'var(--primary-foreground)' : 'var(--foreground)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '3px 8px',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        cursor: isTesting ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {isTesting ? (
+                        <>
+                          <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                          </svg>
+                          <span>...</span>
+                        </>
+                      ) : (
+                        <span>Ping</span>
+                      )}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
       {/* Top Navbar */}
@@ -294,7 +630,7 @@ export default function ModelsBenchmarkPage() {
                 <line x1="6" y1="20" x2="6" y2="14"></line>
               </svg>
               <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
-                Model Benchmarks: Time Per Task & Live Ping Inspector
+                Model Governance: Catalog Discovery & Status Management
               </span>
             </div>
           </div>
@@ -319,7 +655,7 @@ export default function ModelsBenchmarkPage() {
                 opacity: syncingCatalog ? 0.7 : 1,
                 transition: 'all 0.15s ease',
               }}
-              title="Fetch latest active and free models directly from OpenRouter API"
+              title="Sync latest live models from OpenRouter and Google Gemini APIs"
             >
               <svg className={syncingCatalog ? 'spin-animate' : ''} style={syncingCatalog ? { animation: 'spin 0.8s linear infinite' } : {}} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
@@ -403,8 +739,8 @@ export default function ModelsBenchmarkPage() {
             <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
               {[
                 { id: 'all', label: 'ALL' },
-                { id: 'groq', label: 'GROQ (LPU)' },
                 { id: 'gemini', label: 'GEMINI' },
+                { id: 'groq', label: 'GROQ (LPU)' },
                 { id: 'nim', label: 'NIM' },
                 { id: 'openrouter', label: 'OPENROUTER' },
               ].map((p) => (
@@ -479,298 +815,25 @@ export default function ModelsBenchmarkPage() {
           </div>
         </div>
 
-        {/* Active Models Table */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '32px' }}>
+        {/* SECTION 1: Active Models Table */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
               <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
-                Active Models ({activeModels.length})
+                Active Production Models ({activeModels.length})
               </h2>
             </div>
             <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-              Click any Ping button to inspect full prompt & response payload
+              Use the dropdown on any row to flag as Outdated, Incompatible, or Disabled
             </span>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
-                  <th onClick={() => handleHeaderSort('name')} style={{ padding: '10px 16px', cursor: 'pointer', userSelect: 'none' }}>
-                    MODEL & ID {renderSortIndicator('name')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
-                    PROVIDER {renderSortIndicator('provider')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('time_per_task')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
-                    TIME PER TASK (AA) {renderSortIndicator('time_per_task')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
-                    PING RESULT {renderSortIndicator('tested_latency')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
-                    INTELLIGENCE {renderSortIndicator('intelligence_index')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '90px', cursor: 'pointer', userSelect: 'none' }}>
-                    CODING {renderSortIndicator('coding_index')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '90px', cursor: 'pointer', userSelect: 'none' }}>
-                    AGENTIC {renderSortIndicator('agentic_index')}
-                  </th>
-                  <th onClick={() => handleHeaderSort('match_status')} style={{ padding: '10px 16px', width: '220px', cursor: 'pointer', userSelect: 'none' }}>
-                    OPENROUTER MATCH {renderSortIndicator('match_status')}
-                  </th>
-                  <th style={{ padding: '10px 16px', width: '100px', textAlign: 'right' }}>ACTION</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeModels.map((m) => {
-                  const orMatch = m.openrouter_match;
-                  const isTesting = testingModelId === m.id;
-                  const free = isModelFree(m);
-
-                  return (
-                    <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s' }}>
-                      {/* Model & ID */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '13px' }}>
-                            {m.benchmark_hint || m.id}
-                          </span>
-                          {free && (
-                            <span
-                              style={{
-                                padding: '1px 6px',
-                                borderRadius: 'var(--radius-sm)',
-                                fontSize: '10px',
-                                fontWeight: 700,
-                                background: '#f0fdf4',
-                                color: '#16a34a',
-                                border: '1px solid #bbf7d0',
-                              }}
-                            >
-                              FREE
-                            </span>
-                          )}
-                        </div>
-                        <div className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
-                          {m.id} <span style={{ opacity: 0.5 }}>({m.model_string})</span>
-                        </div>
-                      </td>
-
-                      {/* Provider Badge */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: 'var(--radius-sm)',
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            textTransform: 'uppercase',
-                            background:
-                              m.provider === 'cerebras'
-                                ? '#fdf2f8'
-                                : m.provider === 'groq'
-                                ? '#fff7ed'
-                                : m.provider === 'gemini'
-                                ? '#eff6ff'
-                                : m.provider === 'nim'
-                                ? '#f0fdf4'
-                                : '#faf5ff',
-                            color:
-                              m.provider === 'cerebras'
-                                ? '#db2777'
-                                : m.provider === 'groq'
-                                ? '#ea580c'
-                                : m.provider === 'gemini'
-                                ? '#2563eb'
-                                : m.provider === 'nim'
-                                ? '#16a34a'
-                                : '#9333ea',
-                            border: `1px solid ${
-                              m.provider === 'cerebras'
-                                ? '#fbcfe8'
-                                : m.provider === 'groq'
-                                ? '#fed7aa'
-                                : m.provider === 'gemini'
-                                ? '#bfdbfe'
-                                : m.provider === 'nim'
-                                ? '#bbf7d0'
-                                : '#e9d5ff'
-                            }`,
-                          }}
-                        >
-                          {m.provider}
-                        </span>
-                      </td>
-
-                      {/* Time Per Task (AA / Telemetry) */}
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span
-                            className="mono"
-                            style={{
-                              fontWeight: 700,
-                              fontSize: '12px',
-                              color: m.time_per_task_s < 0.5 ? '#16a34a' : m.time_per_task_s < 1.5 ? '#0284c7' : 'var(--foreground)',
-                            }}
-                          >
-                            ~{m.time_per_task_s}s
-                          </span>
-                          <span style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>/ task</span>
-                        </div>
-                      </td>
-
-                      {/* Ping Test Result (Clickable to open trace) */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {m.tested_status === 'ok' ? (
-                          <div
-                            onClick={() => {
-                              setActiveTraceModal({
-                                model: m,
-                                trace: m.ping_trace,
-                                isPinging: false,
-                                activeTab: 'summary',
-                              });
-                            }}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-                            title="Click to inspect raw ping trace"
-                          >
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                            <span className="mono" style={{ fontWeight: 600, color: '#16a34a', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-                              ✓ {m.tested_latency_ms} ms
-                            </span>
-                          </div>
-                        ) : m.tested_status === 'fail' ? (
-                          <div
-                            onClick={() => {
-                              setActiveTraceModal({
-                                model: m,
-                                trace: m.ping_trace,
-                                isPinging: false,
-                                activeTab: 'summary',
-                              });
-                            }}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-                            title={m.tested_error || 'Click to inspect error trace'}
-                          >
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
-                            <span style={{ color: '#ef4444', fontSize: '11px', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-                              ✗ Failed
-                            </span>
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>Untested</span>
-                        )}
-                      </td>
-
-                      {/* OpenRouter Intelligence Index */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {orMatch.intelligence_index !== undefined ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#0284c7' }}>
-                              {orMatch.intelligence_index.toFixed(1)}
-                            </span>
-                            <div style={{ width: '35px', height: '4px', background: 'var(--muted)', borderRadius: '2px', overflow: 'hidden' }}>
-                              <div style={{ width: `${Math.min(100, (orMatch.intelligence_index / 65) * 100)}%`, height: '100%', background: '#0284c7' }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
-                        )}
-                      </td>
-
-                      {/* Coding Index */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {orMatch.coding_index !== undefined ? (
-                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a' }}>
-                            {orMatch.coding_index.toFixed(1)}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
-                        )}
-                      </td>
-
-                      {/* Agentic Index */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {orMatch.agentic_index !== undefined ? (
-                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#9333ea' }}>
-                            {orMatch.agentic_index.toFixed(1)}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--muted-foreground)', fontSize: '11px' }}>—</span>
-                        )}
-                      </td>
-
-                      {/* OpenRouter Matched Model & Pricing */}
-                      <td style={{ padding: '12px 16px' }}>
-                        {orMatch.status === 'success' ? (
-                          <div>
-                            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--foreground)' }}>
-                              ✓ {orMatch.matched_name || orMatch.matched_id}
-                            </div>
-                            <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)', display: 'flex', gap: '6px' }}>
-                              {orMatch.context_length && <span>{(orMatch.context_length / 1000).toFixed(0)}k ctx</span>}
-                              {orMatch.pricing && (
-                                <span>• {orMatch.pricing.prompt === '0' ? 'Free' : `$${(Number(orMatch.pricing.prompt) * 1000000).toFixed(2)}/M`}</span>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: '11px', color: '#ef4444' }}>✗ Not matched</span>
-                        )}
-                      </td>
-
-                      {/* Action - Spinning indefinite indicator during ping */}
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => handleTestSingleModel(m)}
-                          disabled={isTesting || benchmarkingAll}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            background: isTesting ? 'var(--primary)' : 'var(--card)',
-                            color: isTesting ? 'var(--primary-foreground)' : 'var(--foreground)',
-                            border: '1px solid var(--border)',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '4px 10px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            cursor: isTesting ? 'not-allowed' : 'pointer',
-                            boxShadow: 'var(--shadow-subtle)',
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          {isTesting ? (
-                            <>
-                              <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
-                                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                              </svg>
-                              <span>Pinging...</span>
-                            </>
-                          ) : (
-                            <>
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                              </svg>
-                              <span>Ping</span>
-                            </>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {renderModelTable(activeModels, 'active')}
         </div>
 
-        {/* Collapsible Outdated / Legacy Section */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)' }}>
+        {/* SECTION 2: Outdated & Legacy Models */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
           <button
             type="button"
             onClick={() => setShowOutdated(!showOutdated)}
@@ -782,120 +845,90 @@ export default function ModelsBenchmarkPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              background: 'var(--muted)',
+              background: '#fffbeb',
               cursor: 'pointer',
               textAlign: 'left',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#a1a1aa' }} />
-              <h2 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#92400e', margin: 0 }}>
                 Outdated & Legacy Models ({outdatedModels.length})
               </h2>
             </div>
-            <span style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>
-              {showOutdated ? 'Hide ▲' : 'Show ▼'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#b45309' }}>Deprecated versions & legacy baselines</span>
+              <span style={{ fontSize: '12px', color: '#92400e' }}>{showOutdated ? 'Hide ▲' : 'Show ▼'}</span>
+            </div>
           </button>
 
-          {showOutdated && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
-                    <th style={{ padding: '10px 16px' }}>MODEL & ID</th>
-                    <th style={{ padding: '10px 16px', width: '110px' }}>PROVIDER</th>
-                    <th style={{ padding: '10px 16px', width: '150px' }}>TIME PER TASK</th>
-                    <th style={{ padding: '10px 16px', width: '150px' }}>PING RESULT</th>
-                    <th style={{ padding: '10px 16px', width: '130px' }}>INTELLIGENCE</th>
-                    <th style={{ padding: '10px 16px', width: '90px' }}>CODING</th>
-                    <th style={{ padding: '10px 16px', width: '90px' }}>AGENTIC</th>
-                    <th style={{ padding: '10px 16px', width: '220px' }}>OPENROUTER MATCH</th>
-                    <th style={{ padding: '10px 16px', width: '100px', textAlign: 'right' }}>ACTION</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {outdatedModels.map((m) => {
-                    const orMatch = m.openrouter_match;
-                    const isTesting = testingModelId === m.id;
+          {showOutdated && renderModelTable(outdatedModels, 'outdated')}
+        </div>
 
-                    return (
-                      <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', opacity: 0.8 }}>
-                        <td style={{ padding: '10px 16px' }}>
-                          <div style={{ fontWeight: 500, color: 'var(--foreground)' }}>{m.benchmark_hint || m.id}</div>
-                          <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>{m.id}</div>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
-                            {m.provider}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-                            ~{m.time_per_task_s}s
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-                            {m.tested_latency_ms ? `${m.tested_latency_ms} ms` : '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: '#71717a' }}>
-                            {orMatch.intelligence_index !== undefined ? orMatch.intelligence_index.toFixed(1) : '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                            {orMatch.coding_index !== undefined ? orMatch.coding_index.toFixed(1) : '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
-                            {orMatch.agentic_index !== undefined ? orMatch.agentic_index.toFixed(1) : '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-                            {orMatch.matched_name || orMatch.matched_id || '—'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                          <button
-                            onClick={() => handleTestSingleModel(m)}
-                            disabled={isTesting || benchmarkingAll}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              background: 'none',
-                              border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius-sm)',
-                              padding: '3px 8px',
-                              fontSize: '10px',
-                              color: 'var(--muted-foreground)',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {isTesting ? (
-                              <>
-                                <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                  <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                                </svg>
-                                <span>...</span>
-                              </>
-                            ) : (
-                              <span>Ping</span>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {/* SECTION 3: Incompatible Models (Embeddings, TTS, Media, Unsupported) */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '24px' }}>
+          <button
+            type="button"
+            onClick={() => setShowIncompatible(!showIncompatible)}
+            style={{
+              width: '100%',
+              padding: '14px 20px',
+              border: 'none',
+              borderBottom: showIncompatible ? '1px solid var(--border)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#fff1f2',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f43f5e' }} />
+              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#9f1239', margin: 0 }}>
+                Incompatible Models ({incompatibleModels.length})
+              </h2>
             </div>
-          )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#be123c' }}>Embedding-only, Audio/TTS, Video/Media, or unsupported endpoints</span>
+              <span style={{ fontSize: '12px', color: '#9f1239' }}>{showIncompatible ? 'Hide ▲' : 'Show ▼'}</span>
+            </div>
+          </button>
+
+          {showIncompatible && renderModelTable(incompatibleModels, 'incompatible')}
+        </div>
+
+        {/* SECTION 4: Disabled Models */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)' }}>
+          <button
+            type="button"
+            onClick={() => setShowDisabled(!showDisabled)}
+            style={{
+              width: '100%',
+              padding: '14px 20px',
+              border: 'none',
+              borderBottom: showDisabled ? '1px solid var(--border)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#f4f4f5',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#71717a' }} />
+              <h2 style={{ fontSize: '13px', fontWeight: 600, color: '#3f3f46', margin: 0 }}>
+                Disabled Models ({disabledModels.length})
+              </h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#71717a' }}>Explicitly disabled by developer</span>
+              <span style={{ fontSize: '12px', color: '#3f3f46' }}>{showDisabled ? 'Hide ▲' : 'Show ▼'}</span>
+            </div>
+          </button>
+
+          {showDisabled && renderModelTable(disabledModels, 'disabled')}
         </div>
       </main>
 

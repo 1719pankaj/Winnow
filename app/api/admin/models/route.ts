@@ -32,9 +32,12 @@ export interface ModelBenchmarkItem {
   tested_latency_ms?: number;
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
   tested_error?: string;
+  status_override?: 'active' | 'outdated' | 'incompatible' | 'disabled' | null;
+  category: 'active' | 'outdated' | 'incompatible' | 'disabled';
+  incompatible_reason?: string;
   ping_trace?: PingTrace;
   openrouter_match: {
-    status: 'success' | 'not_found' | 'error';
+    status: 'success' | 'not_found' | 'error' | 'fail';
     matched_id?: string;
     matched_name?: string;
     score?: number;
@@ -49,6 +52,56 @@ export interface ModelBenchmarkItem {
       input_cache_read?: string;
     };
   };
+}
+
+export function classifyModelCategory(
+  m: { id: string; provider: string; model_string: string; benchmark_hint?: string },
+  dbStatusOverride?: string | null,
+  isProviderEnabled: boolean = true
+): { category: 'active' | 'outdated' | 'incompatible' | 'disabled'; reason?: string } {
+  // 1. Explicit manual override takes priority
+  if (dbStatusOverride === 'disabled') return { category: 'disabled', reason: 'Manually disabled by admin' };
+  if (dbStatusOverride === 'incompatible') return { category: 'incompatible', reason: 'Flagged incompatible by admin' };
+  if (dbStatusOverride === 'outdated') return { category: 'outdated', reason: 'Flagged outdated / legacy by admin' };
+  if (dbStatusOverride === 'active') return { category: 'active' };
+
+  // 2. Provider disabled
+  if (!isProviderEnabled) return { category: 'disabled', reason: `Provider "${m.provider}" is disabled` };
+
+  const str = (m.id + ' ' + m.model_string + ' ' + (m.benchmark_hint || '')).toLowerCase();
+
+  // 3. Auto-detect Incompatible Models (embedding, TTS, video/image, robotics)
+  if (str.includes('embedding')) {
+    return { category: 'incompatible', reason: 'Embedding-only model (no text generation endpoint)' };
+  }
+  if (str.includes('tts') || str.includes('native-audio') || str.includes('transcribe-live')) {
+    return { category: 'incompatible', reason: 'Audio/TTS model (unsupported for text chat search)' };
+  }
+  if (str.includes('veo') || str.includes('lyria') || str.includes('image-preview') || str.includes('flash-image')) {
+    return { category: 'incompatible', reason: 'Media/Video generator model' };
+  }
+  if (str.includes('robotics')) {
+    return { category: 'incompatible', reason: 'Specialized Robotics model' };
+  }
+  if (str.includes('customtools') || str.includes('aqa')) {
+    return { category: 'incompatible', reason: 'Specialized custom tool / QA interface' };
+  }
+
+  // 4. Auto-detect Outdated / Legacy Models
+  if (
+    str.includes('legacy') ||
+    str.includes('gemini-2.5') ||
+    str.includes('gemini-2.0') ||
+    str.includes('gemini-1.5') ||
+    str.includes('preview-09') ||
+    str.includes('preview-10') ||
+    str.includes('preview-12-2025')
+  ) {
+    return { category: 'outdated', reason: 'Deprecated or legacy model architecture' };
+  }
+
+  // 5. Default Active
+  return { category: 'active' };
 }
 
 function estimateTimePerTask(m: any, match: any): number {
@@ -294,6 +347,7 @@ export async function GET(req: NextRequest) {
       // Match against OpenRouter models
       const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || m.id, orModels);
       const aa = match.matched_model?.benchmarks?.artificial_analysis;
+      const classification = classifyModelCategory(m, dbCard?.status_override, isEnabled);
 
       const item: ModelBenchmarkItem = {
         id: m.id,
@@ -306,6 +360,9 @@ export async function GET(req: NextRequest) {
         tested_latency_ms: dbCard?.tested_latency_ms,
         tested_status: !isEnabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
         tested_error: dbCard?.tested_error,
+        status_override: dbCard?.status_override,
+        category: classification.category,
+        incompatible_reason: classification.reason,
         openrouter_match: {
           status: match.status,
           matched_id: match.matched_model?.id,
@@ -334,6 +391,11 @@ export async function GET(req: NextRequest) {
       const dbCard = dbCardMap.get(customId);
       const match = matchOpenRouterModel(customId, rawModelString, gm.displayName, orModels);
       const aa = match.matched_model?.benchmarks?.artificial_analysis;
+      const classification = classifyModelCategory(
+        { id: customId, provider: 'gemini', model_string: rawModelString, benchmark_hint: gm.displayName },
+        dbCard?.status_override,
+        geminiProvider?.enabled ?? false
+      );
 
       items.push({
         id: customId,
@@ -350,6 +412,9 @@ export async function GET(req: NextRequest) {
         tested_latency_ms: dbCard?.tested_latency_ms,
         tested_status: !geminiProvider?.enabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
         tested_error: dbCard?.tested_error,
+        status_override: dbCard?.status_override,
+        category: classification.category,
+        incompatible_reason: classification.reason,
         openrouter_match: {
           status: match.status,
           matched_id: match.matched_model?.id,
@@ -389,6 +454,8 @@ export async function POST(req: NextRequest) {
 
     const orModels = await fetchOpenRouterModels();
     const googleModels = await fetchGoogleGeminiModels(geminiProvider?.api_key);
+    const cachedDbCards = await store.getCachedModelCards();
+    const dbCardMap = new Map(cachedDbCards.map((c) => [c.id, c]));
 
     // Build complete pool of models (configured + auto-discovered Gemini)
     const allModels: any[] = [...config.inference.models];
@@ -412,6 +479,8 @@ export async function POST(req: NextRequest) {
       const p = provMap.get(m.provider);
       const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || m.id, orModels);
       const aa = match.matched_model?.benchmarks?.artificial_analysis;
+      const dbCard = dbCardMap.get(m.id);
+      const classification = classifyModelCategory(m, dbCard?.status_override, p?.enabled ?? false);
 
       if (!p || !p.enabled) {
         const item: ModelBenchmarkItem = {
@@ -423,6 +492,9 @@ export async function POST(req: NextRequest) {
           capabilities: m.capabilities,
           time_per_task_s: estimateTimePerTask(m, match),
           tested_status: 'disabled',
+          status_override: dbCard?.status_override,
+          category: classification.category,
+          incompatible_reason: classification.reason,
           openrouter_match: {
             status: match.status,
             matched_id: match.matched_model?.id,
@@ -454,6 +526,9 @@ export async function POST(req: NextRequest) {
         tested_latency_ms: trace.latency_ms,
         tested_status: isOk ? 'ok' : 'fail',
         tested_error: trace.error,
+        status_override: dbCard?.status_override,
+        category: classification.category,
+        incompatible_reason: classification.reason,
         ping_trace: trace,
         openrouter_match: {
           status: match.status,
@@ -482,6 +557,7 @@ export async function POST(req: NextRequest) {
         openrouter_id: match.matched_model?.id,
         context_length: match.matched_model?.context_length,
         match_status: match.status,
+        status_override: dbCard?.status_override,
         updated_at: new Date().toISOString(),
       });
 

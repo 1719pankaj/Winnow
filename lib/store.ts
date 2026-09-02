@@ -16,6 +16,7 @@ export interface CachedModelCard {
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
   tested_error?: string;
   capabilities_json?: string;
+  status_override?: 'active' | 'outdated' | 'incompatible' | 'disabled' | null;
   updated_at: string;
 }
 
@@ -121,6 +122,7 @@ class WinnowStore {
       `ALTER TABLE model_cards ADD COLUMN tested_status TEXT`,
       `ALTER TABLE model_cards ADD COLUMN tested_error TEXT`,
       `ALTER TABLE model_cards ADD COLUMN capabilities_json TEXT`,
+      `ALTER TABLE model_cards ADD COLUMN status_override TEXT`,
       `ALTER TABLE model_cards ADD COLUMN updated_at TEXT`,
     ];
 
@@ -326,8 +328,23 @@ class WinnowStore {
       tested_status: row.tested_status || 'untested',
       tested_error: row.tested_error || undefined,
       capabilities_json: row.capabilities_json || undefined,
+      status_override: row.status_override || undefined,
       updated_at: row.updated_at || new Date().toISOString(),
     }));
+  }
+
+  async setModelStatusOverride(id: string, status: 'active' | 'outdated' | 'incompatible' | 'disabled' | null): Promise<void> {
+    await this.init();
+    await this.client.execute({
+      sql: `
+        INSERT INTO model_cards (id, status_override, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status_override = excluded.status_override,
+          updated_at = excluded.updated_at
+      `,
+      args: [id, status, new Date().toISOString()],
+    });
   }
 
   async saveCachedModelCard(card: CachedModelCard): Promise<void> {
@@ -337,37 +354,39 @@ class WinnowStore {
         INSERT INTO model_cards (
           id, provider, model_string, intelligence_index, coding_index, agentic_index,
           openrouter_id, context_length, match_status, tested_latency_ms,
-          tested_status, tested_error, capabilities_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tested_status, tested_error, capabilities_json, status_override, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          provider=excluded.provider,
-          model_string=excluded.model_string,
-          intelligence_index=excluded.intelligence_index,
-          coding_index=excluded.coding_index,
-          agentic_index=excluded.agentic_index,
-          openrouter_id=excluded.openrouter_id,
-          context_length=excluded.context_length,
-          match_status=excluded.match_status,
-          tested_latency_ms=excluded.tested_latency_ms,
-          tested_status=excluded.tested_status,
+          provider=coalesce(excluded.provider, model_cards.provider),
+          model_string=coalesce(excluded.model_string, model_cards.model_string),
+          intelligence_index=coalesce(excluded.intelligence_index, model_cards.intelligence_index),
+          coding_index=coalesce(excluded.coding_index, model_cards.coding_index),
+          agentic_index=coalesce(excluded.agentic_index, model_cards.agentic_index),
+          openrouter_id=coalesce(excluded.openrouter_id, model_cards.openrouter_id),
+          context_length=coalesce(excluded.context_length, model_cards.context_length),
+          match_status=coalesce(excluded.match_status, model_cards.match_status),
+          tested_latency_ms=coalesce(excluded.tested_latency_ms, model_cards.tested_latency_ms),
+          tested_status=coalesce(excluded.tested_status, model_cards.tested_status),
           tested_error=excluded.tested_error,
-          capabilities_json=excluded.capabilities_json,
+          capabilities_json=coalesce(excluded.capabilities_json, model_cards.capabilities_json),
+          status_override=coalesce(excluded.status_override, model_cards.status_override),
           updated_at=excluded.updated_at
       `,
       args: [
         card.id,
-        card.provider,
-        card.model_string,
+        card.provider || null,
+        card.model_string || null,
         card.intelligence_index !== undefined ? card.intelligence_index : null,
         card.coding_index !== undefined ? card.coding_index : null,
         card.agentic_index !== undefined ? card.agentic_index : null,
         card.openrouter_id || null,
         card.context_length !== undefined ? card.context_length : null,
-        card.match_status,
+        card.match_status || null,
         card.tested_latency_ms !== undefined ? card.tested_latency_ms : null,
-        card.tested_status,
+        card.tested_status || null,
         card.tested_error || null,
         card.capabilities_json || null,
+        card.status_override || null,
         card.updated_at,
       ],
     });

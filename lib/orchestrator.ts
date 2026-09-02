@@ -260,6 +260,20 @@ export class SearchOrchestrator {
     await this.logDeliberation('retrieve', `Deduplicated and fused ${candidates.length} raw hits into ${activeCount} candidates (RRF k=${config.winnow.fusion.rrf_k})`);
     await this.emit('retrieve_done', { raw_count: candidates.length, unique_count: activeCount });
 
+    // Stream full candidate list for live rendering
+    await this.emit('retrieve_candidates', {
+      candidates: candidates.map((c) => ({
+        id: c.id,
+        url: c.url,
+        domain: c.domain,
+        title: c.title,
+        snippet: c.snippet,
+        sources: c.sources,
+        fused_score: c.fused_score,
+        published_at: c.published_at,
+      })),
+    });
+
     if (activeCount === 0) {
       await this.logDeliberation('retrieve', 'Zero candidates retrieved from search providers.');
       await this.emit('done', { elapsed_ms: Date.now() - t0, total_llm_calls: 0, cache_hits: 0 });
@@ -310,6 +324,25 @@ export class SearchOrchestrator {
       blocklist_drops: prefilterOut.droppedByBlocklist,
     });
 
+    // Stream full prefilter evaluations for live rendering
+    await this.emit('prefilter_evaluations', {
+      kept_count: prefilterOut.keptCount,
+      dropped_count: prefilterOut.droppedCount,
+      drops_by_blocklist: prefilterOut.droppedByBlocklist,
+      evaluations: candidates.map((c) => ({
+        id: c.id,
+        url: c.url,
+        domain: c.domain,
+        title: c.title,
+        snippet: c.snippet,
+        prefilter_score: c.prefilter_score || 0,
+        fused_score: c.fused_score || 0,
+        action: c.dropped_at_stage ? `Drop` : 'Keep',
+        drop_reason: c.drop_reason || null,
+        dropped_at_stage: c.dropped_at_stage || null,
+      })),
+    });
+
     // Provisional results
     const interimRanked = stageAssemble(candidates);
     await this.emit('interim_results', { results: interimRanked });
@@ -348,6 +381,23 @@ export class SearchOrchestrator {
         ok: fetchOut.okCount,
         failed: fetchOut.failedCount,
         from_cache: fetchOut.fromCacheCount,
+      });
+
+      // Stream fetched page content for live rendering (truncated to 2000 chars per page)
+      await this.emit('fetch_content', {
+        pages: candidates
+          .filter((c) => !c.dropped_at_stage && c.content)
+          .map((c) => ({
+            id: c.id,
+            url: c.url,
+            domain: c.domain,
+            title: c.title,
+            fetch_status: c.content!.fetch_status,
+            extraction_method: c.content!.extraction_method,
+            char_count: c.content!.char_count,
+            truncated: c.content!.truncated,
+            text_preview: c.content!.text.slice(0, 2000),
+          })),
       });
     } else {
       await this.emit('stage_skipped', { stage: 'fetch', reason: 'fast_tier_snippets_only' });
@@ -424,6 +474,26 @@ export class SearchOrchestrator {
 
     await this.logDeliberation('rerank', `Reranking complete (${rerankOut.parse_ladder_rung || 'parsed'} via ${modelId}): ${rerankOut.keptCount} kept, ${rerankOut.droppedCount} dropped.`);
     await this.emit('rerank_done', { kept: rerankOut.keptCount, dropped: rerankOut.droppedCount });
+
+    // Stream full LLM inference data for live rendering
+    await this.emit('rerank_inference', {
+      model_id: modelId,
+      parse_ladder_rung: rerankOut.parse_ladder_rung,
+      system_prompt: rerankOut.system_prompt,
+      user_prompt: rerankOut.user_prompt,
+      raw_response: rerankOut.raw_response,
+      evaluations: candidates
+        .filter((c) => !c.dropped_at_stage || c.verdict)
+        .map((c) => ({
+          id: c.id,
+          domain: c.domain,
+          title: c.title,
+          url: c.url,
+          final_score: c.final_score || 0,
+          verdict: c.verdict || 'keep',
+          rationale: c.rationale || '',
+        })),
+    });
 
     // ----------------------------------------------------
     // STAGE 5: ASSEMBLE (Final Ranked Results & Provenance)

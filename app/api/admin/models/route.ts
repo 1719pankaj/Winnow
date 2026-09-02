@@ -1,11 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadConfig } from '@/lib/config/loader';
 import { fetchOpenRouterModels, matchOpenRouterModel } from '@/lib/benchmarks';
-import { InferenceAdapter } from '@/lib/adapters/inference';
 import { store, CachedModelCard } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+export interface PingTrace {
+  model_id: string;
+  provider: string;
+  model_string: string;
+  endpoint_url: string;
+  method: string;
+  request_headers: Record<string, string>;
+  request_body: any;
+  response_status: number;
+  response_status_text: string;
+  response_body?: any;
+  response_raw_text?: string;
+  latency_ms: number;
+  error?: string;
+  timestamp: string;
+}
 
 export interface ModelBenchmarkItem {
   id: string;
@@ -14,10 +30,11 @@ export interface ModelBenchmarkItem {
   benchmark_hint?: string;
   role: string[];
   capabilities: any;
-  time_per_task_s: number; // Estimated / Benchmark Time per Task (seconds)
-  tested_latency_ms?: number; // Measured ping roundtrip (ms)
+  time_per_task_s: number;
+  tested_latency_ms?: number;
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
   tested_error?: string;
+  ping_trace?: PingTrace;
   openrouter_match: {
     status: 'success' | 'fail';
     matched_id?: string;
@@ -50,6 +67,198 @@ function estimateTimePerTask(m: any, match: any): number {
   if (m.id.includes('gemma-4-31b')) return m.provider === 'cerebras' ? 0.15 : 1.7;
   if (m.id.includes('legacy')) return 2.8;
   return 1.8;
+}
+
+function maskApiKey(key?: string): string {
+  if (!key) return '(not provided)';
+  if (key.length <= 8) return '********';
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+async function executePing(provider: any, model: any): Promise<PingTrace> {
+  const t0 = Date.now();
+  const timestamp = new Date().toISOString();
+
+  if (provider.name === 'gemini') {
+    const apiKey = provider.api_key || process.env.GEMINI_AI_STUDIO_KEY || '';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.model_string}:generateContent?key=${apiKey}`;
+    const maskedEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model.model_string}:generateContent?key=${maskApiKey(apiKey)}`;
+
+    const bodyObj: any = {
+      contents: [{ parts: [{ text: 'Say "OK"' }] }],
+      generationConfig: {
+        maxOutputTokens: 10,
+        temperature: 0.1,
+      },
+    };
+
+    if (model.capabilities?.thinking_budget) {
+      bodyObj.generationConfig.thinkingConfig = {
+        thinkingBudget: model.capabilities.thinking_budget,
+      };
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bodyObj),
+        signal: AbortSignal.timeout(12000),
+      });
+
+      const latency_ms = Date.now() - t0;
+      const rawText = await res.text();
+      let parsedBody = undefined;
+      try {
+        parsedBody = JSON.parse(rawText);
+      } catch {}
+
+      if (!res.ok) {
+        return {
+          model_id: model.id,
+          provider: provider.name,
+          model_string: model.model_string,
+          endpoint_url: maskedEndpoint,
+          method: 'POST',
+          request_headers: headers,
+          request_body: bodyObj,
+          response_status: res.status,
+          response_status_text: res.statusText,
+          response_body: parsedBody,
+          response_raw_text: rawText,
+          latency_ms,
+          error: `HTTP ${res.status}: ${res.statusText}`,
+          timestamp,
+        };
+      }
+
+      return {
+        model_id: model.id,
+        provider: provider.name,
+        model_string: model.model_string,
+        endpoint_url: maskedEndpoint,
+        method: 'POST',
+        request_headers: headers,
+        request_body: bodyObj,
+        response_status: res.status,
+        response_status_text: res.statusText,
+        response_body: parsedBody,
+        response_raw_text: rawText,
+        latency_ms,
+        timestamp,
+      };
+    } catch (err: any) {
+      return {
+        model_id: model.id,
+        provider: provider.name,
+        model_string: model.model_string,
+        endpoint_url: maskedEndpoint,
+        method: 'POST',
+        request_headers: headers,
+        request_body: bodyObj,
+        response_status: 0,
+        response_status_text: 'Network / Timeout Error',
+        latency_ms: Date.now() - t0,
+        error: err.message || 'Connection failed',
+        timestamp,
+      };
+    }
+  } else {
+    // OpenAI-compatible providers: Groq, Cerebras, OpenRouter, NIM
+    const endpoint = `${provider.base_url.replace(/\/+$/, '')}/chat/completions`;
+    const apiKey = provider.api_key || '';
+    const maskedHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${maskApiKey(apiKey)}`,
+      ...(provider.extra_headers || {}),
+    };
+    const realHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      ...(provider.extra_headers || {}),
+    };
+
+    const bodyObj: any = {
+      model: model.model_string,
+      messages: [{ role: 'user', content: 'Say "OK"' }],
+      max_tokens: 10,
+      temperature: 0.1,
+    };
+
+    if (model.capabilities?.reasoning_effort) {
+      bodyObj.reasoning_effort = model.capabilities.reasoning_effort;
+    }
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: realHeaders,
+        body: JSON.stringify(bodyObj),
+        signal: AbortSignal.timeout(12000),
+      });
+
+      const latency_ms = Date.now() - t0;
+      const rawText = await res.text();
+      let parsedBody = undefined;
+      try {
+        parsedBody = JSON.parse(rawText);
+      } catch {}
+
+      if (!res.ok) {
+        return {
+          model_id: model.id,
+          provider: provider.name,
+          model_string: model.model_string,
+          endpoint_url: endpoint,
+          method: 'POST',
+          request_headers: maskedHeaders,
+          request_body: bodyObj,
+          response_status: res.status,
+          response_status_text: res.statusText,
+          response_body: parsedBody,
+          response_raw_text: rawText,
+          latency_ms,
+          error: `HTTP ${res.status}: ${res.statusText}`,
+          timestamp,
+        };
+      }
+
+      return {
+        model_id: model.id,
+        provider: provider.name,
+        model_string: model.model_string,
+        endpoint_url: endpoint,
+        method: 'POST',
+        request_headers: maskedHeaders,
+        request_body: bodyObj,
+        response_status: res.status,
+        response_status_text: res.statusText,
+        response_body: parsedBody,
+        response_raw_text: rawText,
+        latency_ms,
+        timestamp,
+      };
+    } catch (err: any) {
+      return {
+        model_id: model.id,
+        provider: provider.name,
+        model_string: model.model_string,
+        endpoint_url: endpoint,
+        method: 'POST',
+        request_headers: maskedHeaders,
+        request_body: bodyObj,
+        response_status: 0,
+        response_status_text: 'Network / Timeout Error',
+        latency_ms: Date.now() - t0,
+        error: err.message || 'Connection failed',
+        timestamp,
+      };
+    }
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -162,109 +371,54 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const adapter = new InferenceAdapter(p, m);
-      const t0 = Date.now();
+      // Execute live ping with full request/response trace capture
+      const pingTrace = await executePing(p, m);
+      const isOk = pingTrace.response_status >= 200 && pingTrace.response_status < 300;
 
-      try {
-        const timeoutPromise = new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('Benchmark timed out after 12000ms')), 12000)
-        );
-
-        const callPromise = adapter.complete(
-          [{ role: 'user', content: 'Say "OK"' }],
-          { maxTokens: 10, temperature: 0.1 }
-        );
-
-        await Promise.race([callPromise, timeoutPromise]);
-        const elapsed = Date.now() - t0;
-
-        const item: ModelBenchmarkItem = {
-          id: m.id,
-          provider: m.provider,
-          model_string: m.model_string,
-          benchmark_hint: (m as any).benchmark_hint,
-          role: m.role,
-          capabilities: m.capabilities,
-          time_per_task_s: estimateTimePerTask(m, match),
-          tested_latency_ms: elapsed,
-          tested_status: 'ok',
-          openrouter_match: {
-            status: match.status,
-            matched_id: match.matched_model?.id,
-            matched_name: match.matched_model?.name,
-            score: match.score,
-            intelligence_index: aa?.intelligence_index,
-            coding_index: aa?.coding_index,
-            agentic_index: aa?.agentic_index,
-            context_length: match.matched_model?.context_length,
-            pricing: match.matched_model?.pricing,
-          },
-        };
-
-        // Cache in Turso DB
-        await store.saveCachedModelCard({
-          id: m.id,
-          provider: m.provider,
-          model_string: m.model_string,
+      const item: ModelBenchmarkItem = {
+        id: m.id,
+        provider: m.provider,
+        model_string: m.model_string,
+        benchmark_hint: (m as any).benchmark_hint,
+        role: m.role,
+        capabilities: m.capabilities,
+        time_per_task_s: estimateTimePerTask(m, match),
+        tested_latency_ms: pingTrace.latency_ms,
+        tested_status: isOk ? 'ok' : 'fail',
+        tested_error: isOk ? undefined : (pingTrace.error || `HTTP ${pingTrace.response_status}`),
+        ping_trace: pingTrace,
+        openrouter_match: {
+          status: match.status,
+          matched_id: match.matched_model?.id,
+          matched_name: match.matched_model?.name,
+          score: match.score,
           intelligence_index: aa?.intelligence_index,
           coding_index: aa?.coding_index,
           agentic_index: aa?.agentic_index,
-          openrouter_id: match.matched_model?.id,
           context_length: match.matched_model?.context_length,
-          match_status: match.status,
-          tested_latency_ms: elapsed,
-          tested_status: 'ok',
-          capabilities_json: JSON.stringify(m.capabilities),
-          updated_at: new Date().toISOString(),
-        });
+          pricing: match.matched_model?.pricing,
+        },
+      };
 
-        benchmarkResults.push(item);
-      } catch (err: any) {
-        const elapsed = Date.now() - t0;
-        const item: ModelBenchmarkItem = {
-          id: m.id,
-          provider: m.provider,
-          model_string: m.model_string,
-          benchmark_hint: (m as any).benchmark_hint,
-          role: m.role,
-          capabilities: m.capabilities,
-          time_per_task_s: estimateTimePerTask(m, match),
-          tested_latency_ms: elapsed,
-          tested_status: 'fail',
-          tested_error: err.message,
-          openrouter_match: {
-            status: match.status,
-            matched_id: match.matched_model?.id,
-            matched_name: match.matched_model?.name,
-            score: match.score,
-            intelligence_index: aa?.intelligence_index,
-            coding_index: aa?.coding_index,
-            agentic_index: aa?.agentic_index,
-            context_length: match.matched_model?.context_length,
-            pricing: match.matched_model?.pricing,
-          },
-        };
+      // Cache in Turso DB
+      await store.saveCachedModelCard({
+        id: m.id,
+        provider: m.provider,
+        model_string: m.model_string,
+        intelligence_index: aa?.intelligence_index,
+        coding_index: aa?.coding_index,
+        agentic_index: aa?.agentic_index,
+        openrouter_id: match.matched_model?.id,
+        context_length: match.matched_model?.context_length,
+        match_status: match.status,
+        tested_latency_ms: pingTrace.latency_ms,
+        tested_status: isOk ? 'ok' : 'fail',
+        tested_error: isOk ? undefined : pingTrace.error,
+        capabilities_json: JSON.stringify(m.capabilities),
+        updated_at: new Date().toISOString(),
+      });
 
-        // Cache failure in Turso DB
-        await store.saveCachedModelCard({
-          id: m.id,
-          provider: m.provider,
-          model_string: m.model_string,
-          intelligence_index: aa?.intelligence_index,
-          coding_index: aa?.coding_index,
-          agentic_index: aa?.agentic_index,
-          openrouter_id: match.matched_model?.id,
-          context_length: match.matched_model?.context_length,
-          match_status: match.status,
-          tested_latency_ms: elapsed,
-          tested_status: 'fail',
-          tested_error: err.message,
-          capabilities_json: JSON.stringify(m.capabilities),
-          updated_at: new Date().toISOString(),
-        });
-
-        benchmarkResults.push(item);
-      }
+      benchmarkResults.push(item);
     }
 
     return NextResponse.json({

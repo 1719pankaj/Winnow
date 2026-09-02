@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { ModelBenchmarkItem } from '../api/admin/models/route';
+import { ModelBenchmarkItem, PingTrace } from '../api/admin/models/route';
 
 type SortKey = 'name' | 'provider' | 'time_per_task' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
 type SortOrder = 'asc' | 'desc';
@@ -16,6 +16,16 @@ export default function ModelsBenchmarkPage() {
   const [filterFreeOnly, setFilterFreeOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [showOutdated, setShowOutdated] = useState(true);
+
+  // Inspector Modal State
+  const [activeTraceModal, setActiveTraceModal] = useState<{
+    model: ModelBenchmarkItem;
+    trace?: PingTrace;
+    isPinging: boolean;
+    activeTab: 'summary' | 'request' | 'response';
+  } | null>(null);
+
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Sorting state
   const [sortKey, setSortKey] = useState<SortKey>('intelligence_index');
@@ -76,26 +86,43 @@ export default function ModelsBenchmarkPage() {
     }
   };
 
-  // Run benchmark on a single model
-  const handleTestSingleModel = async (modelId: string) => {
+  // Run benchmark on a single model and open Developer Ping Inspector
+  const handleTestSingleModel = async (model: ModelBenchmarkItem) => {
     try {
-      setTestingModelId(modelId);
+      setTestingModelId(model.id);
+      setActiveTraceModal({
+        model,
+        trace: model.ping_trace,
+        isPinging: true,
+        activeTab: 'summary',
+      });
+
       const res = await fetch('/api/admin/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: modelId }),
+        body: JSON.stringify({ model_id: model.id }),
       });
+
       if (res.ok) {
         const data = await res.json();
         const updated = data.results?.[0];
         if (updated) {
           setModels((prev) =>
-            prev.map((m) => (m.id === modelId ? { ...m, ...updated } : m))
+            prev.map((m) => (m.id === model.id ? { ...m, ...updated } : m))
           );
+          setActiveTraceModal({
+            model: { ...model, ...updated },
+            trace: updated.ping_trace,
+            isPinging: false,
+            activeTab: 'summary',
+          });
         }
       }
     } catch (err) {
       console.error(err);
+      if (activeTraceModal) {
+        setActiveTraceModal((prev) => (prev ? { ...prev, isPinging: false } : null));
+      }
     } finally {
       setTestingModelId(null);
     }
@@ -209,6 +236,12 @@ export default function ModelsBenchmarkPage() {
     );
   };
 
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
       {/* Top Navbar */}
@@ -226,7 +259,7 @@ export default function ModelsBenchmarkPage() {
                 <line x1="6" y1="20" x2="6" y2="14"></line>
               </svg>
               <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
-                Model Benchmarks: Time Per Task & Ping Tests
+                Model Benchmarks: Time Per Task & Live Ping Inspector
               </span>
             </div>
           </div>
@@ -422,7 +455,7 @@ export default function ModelsBenchmarkPage() {
               </h2>
             </div>
             <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-              AA Time per Task & Tested Ping Results
+              Click any Ping button to inspect full prompt & response payload
             </span>
           </div>
 
@@ -454,7 +487,7 @@ export default function ModelsBenchmarkPage() {
                   <th onClick={() => handleHeaderSort('match_status')} style={{ padding: '10px 16px', width: '220px', cursor: 'pointer', userSelect: 'none' }}>
                     OPENROUTER MATCH {renderSortIndicator('match_status')}
                   </th>
-                  <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
+                  <th style={{ padding: '10px 16px', width: '100px', textAlign: 'right' }}>ACTION</th>
                 </tr>
               </thead>
               <tbody>
@@ -556,19 +589,41 @@ export default function ModelsBenchmarkPage() {
                         </div>
                       </td>
 
-                      {/* Ping Test Result */}
+                      {/* Ping Test Result (Clickable to open trace) */}
                       <td style={{ padding: '12px 16px' }}>
                         {m.tested_status === 'ok' ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div
+                            onClick={() => {
+                              setActiveTraceModal({
+                                model: m,
+                                trace: m.ping_trace,
+                                isPinging: false,
+                                activeTab: 'summary',
+                              });
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                            title="Click to inspect raw ping trace"
+                          >
                             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                            <span className="mono" style={{ fontWeight: 600, color: '#16a34a' }}>
+                            <span className="mono" style={{ fontWeight: 600, color: '#16a34a', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
                               ✓ {m.tested_latency_ms} ms
                             </span>
                           </div>
                         ) : m.tested_status === 'fail' ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div
+                            onClick={() => {
+                              setActiveTraceModal({
+                                model: m,
+                                trace: m.ping_trace,
+                                isPinging: false,
+                                activeTab: 'summary',
+                              });
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                            title={m.tested_error || 'Click to inspect error trace'}
+                          >
                             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
-                            <span style={{ color: '#ef4444', fontSize: '11px', fontWeight: 500 }} title={m.tested_error}>
+                            <span style={{ color: '#ef4444', fontSize: '11px', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: '2px' }}>
                               ✗ Failed
                             </span>
                           </div>
@@ -634,23 +689,42 @@ export default function ModelsBenchmarkPage() {
                         )}
                       </td>
 
-                      {/* Action */}
+                      {/* Action - Spinning indefinite indicator during ping */}
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <button
-                          onClick={() => handleTestSingleModel(m.id)}
+                          onClick={() => handleTestSingleModel(m)}
                           disabled={isTesting || benchmarkingAll}
                           style={{
-                            background: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            background: isTesting ? 'var(--primary)' : 'var(--card)',
+                            color: isTesting ? 'var(--primary-foreground)' : 'var(--foreground)',
                             border: '1px solid var(--border)',
                             borderRadius: 'var(--radius-sm)',
-                            padding: '3px 8px',
+                            padding: '4px 10px',
                             fontSize: '11px',
-                            fontWeight: 500,
-                            color: 'var(--foreground)',
-                            cursor: 'pointer',
+                            fontWeight: 600,
+                            cursor: isTesting ? 'not-allowed' : 'pointer',
+                            boxShadow: 'var(--shadow-subtle)',
+                            transition: 'all 0.15s ease',
                           }}
                         >
-                          {isTesting ? '...' : 'Ping'}
+                          {isTesting ? (
+                            <>
+                              <svg className="spin-animate" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                              </svg>
+                              <span>Pinging...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                              </svg>
+                              <span>Ping</span>
+                            </>
+                          )}
                         </button>
                       </td>
                     </tr>
@@ -703,7 +777,7 @@ export default function ModelsBenchmarkPage() {
                     <th style={{ padding: '10px 16px', width: '90px' }}>CODING</th>
                     <th style={{ padding: '10px 16px', width: '90px' }}>AGENTIC</th>
                     <th style={{ padding: '10px 16px', width: '220px' }}>OPENROUTER MATCH</th>
-                    <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
+                    <th style={{ padding: '10px 16px', width: '100px', textAlign: 'right' }}>ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -754,19 +828,31 @@ export default function ModelsBenchmarkPage() {
                         </td>
                         <td style={{ padding: '10px 16px', textAlign: 'right' }}>
                           <button
-                            onClick={() => handleTestSingleModel(m.id)}
+                            onClick={() => handleTestSingleModel(m)}
                             disabled={isTesting || benchmarkingAll}
                             style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
                               background: 'none',
                               border: '1px solid var(--border)',
                               borderRadius: 'var(--radius-sm)',
-                              padding: '2px 6px',
+                              padding: '3px 8px',
                               fontSize: '10px',
                               color: 'var(--muted-foreground)',
                               cursor: 'pointer',
                             }}
                           >
-                            {isTesting ? '...' : 'Ping'}
+                            {isTesting ? (
+                              <>
+                                <svg className="spin-animate" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                                </svg>
+                                <span>...</span>
+                              </>
+                            ) : (
+                              <span>Ping</span>
+                            )}
                           </button>
                         </td>
                       </tr>
@@ -778,6 +864,427 @@ export default function ModelsBenchmarkPage() {
           )}
         </div>
       </main>
+
+      {/* Developer Ping Inspector Modal */}
+      {activeTraceModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '24px',
+          }}
+          onClick={() => {
+            if (!activeTraceModal.isPinging) setActiveTraceModal(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#09090b',
+              border: '1px solid #27272a',
+              borderRadius: 'var(--radius-xl)',
+              width: '100%',
+              maxWidth: '820px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              overflow: 'hidden',
+              color: '#f4f4f5',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #27272a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#18181b',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: 'var(--radius-md)',
+                    background: '#27272a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 17 10 11 4 5"></polyline>
+                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                  </svg>
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#ffffff' }}>
+                      {activeTraceModal.model.benchmark_hint || activeTraceModal.model.id}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        padding: '1px 6px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: '#27272a',
+                        color: '#a1a1aa',
+                      }}
+                    >
+                      {activeTraceModal.model.provider}
+                    </span>
+                  </div>
+                  <div className="mono" style={{ fontSize: '11px', color: '#71717a' }}>
+                    {activeTraceModal.model.model_string}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Re-Ping Button */}
+                <button
+                  type="button"
+                  onClick={() => handleTestSingleModel(activeTraceModal.model)}
+                  disabled={activeTraceModal.isPinging}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: '#27272a',
+                    border: '1px solid #3f3f46',
+                    color: '#ffffff',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '5px 12px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: activeTraceModal.isPinging ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {activeTraceModal.isPinging ? (
+                    <svg className="spin-animate" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                    </svg>
+                  ) : (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                  )}
+                  <span>Re-Ping</span>
+                </button>
+
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTraceModal(null)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#a1a1aa',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Tab Switcher */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '8px 20px',
+                borderBottom: '1px solid #27272a',
+                background: '#121215',
+              }}
+            >
+              {[
+                { id: 'summary', label: '1. Overview & Live Result' },
+                { id: 'request', label: '2. Request Payload & Prompt' },
+                { id: 'response', label: '3. Raw HTTP Response' },
+              ].map((tab: any) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTraceModal({ ...activeTraceModal, activeTab: tab.id })}
+                  style={{
+                    background: activeTraceModal.activeTab === tab.id ? '#27272a' : 'transparent',
+                    color: activeTraceModal.activeTab === tab.id ? '#ffffff' : '#a1a1aa',
+                    border: 'none',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 12px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', flex: 1, maxHeight: 'calc(90vh - 160px)' }}>
+              {activeTraceModal.isPinging ? (
+                <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+                  <svg className="spin-animate" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" style={{ margin: '0 auto 16px auto' }}>
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                  </svg>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#ffffff', marginBottom: '6px' }}>
+                    Pinging endpoint...
+                  </h3>
+                  <p className="mono" style={{ fontSize: '12px', color: '#a1a1aa' }}>
+                    Sending test prompt [{JSON.stringify({ role: 'user', content: 'Say "OK"' })}]
+                  </p>
+                </div>
+              ) : !activeTraceModal.trace ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#a1a1aa' }}>
+                  <p>No ping trace recorded yet for this session.</p>
+                  <button
+                    type="button"
+                    onClick={() => handleTestSingleModel(activeTraceModal.model)}
+                    style={{
+                      marginTop: '12px',
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '8px 16px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Execute Test Ping Now
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  {/* TAB 1: SUMMARY */}
+                  {activeTraceModal.activeTab === 'summary' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {/* Metric Summary Bar */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(4, 1fr)',
+                          gap: '12px',
+                          background: '#18181b',
+                          padding: '12px 16px',
+                          borderRadius: 'var(--radius-lg)',
+                          border: '1px solid #27272a',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
+                            HTTP STATUS
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              marginTop: '2px',
+                              color: activeTraceModal.trace.response_status >= 200 && activeTraceModal.trace.response_status < 300 ? '#22c55e' : '#ef4444',
+                            }}
+                          >
+                            {activeTraceModal.trace.response_status ? `${activeTraceModal.trace.response_status} ${activeTraceModal.trace.response_status_text}` : 'Connection Failed'}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
+                            ROUNDTRIP PING
+                          </div>
+                          <div className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', marginTop: '2px' }}>
+                            {activeTraceModal.trace.latency_ms} ms
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
+                            TASK LATENCY (AA)
+                          </div>
+                          <div className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#a855f7', marginTop: '2px' }}>
+                            ~{activeTraceModal.model.time_per_task_s}s
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700 }}>
+                            METHOD & TARGET
+                          </div>
+                          <div className="mono" style={{ fontSize: '11px', color: '#e4e4e7', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {activeTraceModal.trace.method} {activeTraceModal.model.provider}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Literal Model Output Display */}
+                      <div
+                        style={{
+                          background: '#18181b',
+                          border: '1px solid #27272a',
+                          borderRadius: 'var(--radius-lg)',
+                          padding: '14px 16px',
+                        }}
+                      >
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>Model Output / Response Body</span>
+                          {activeTraceModal.trace.error && <span style={{ color: '#ef4444' }}>✗ Error Details</span>}
+                        </div>
+
+                        {activeTraceModal.trace.error ? (
+                          <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 'var(--radius-md)', padding: '12px', color: '#fca5a5', fontSize: '12px' }}>
+                            <strong>Error:</strong> {activeTraceModal.trace.error}
+                          </div>
+                        ) : (
+                          <div className="mono" style={{ background: '#09090b', padding: '12px', borderRadius: 'var(--radius-md)', fontSize: '13px', color: '#22c55e', border: '1px solid #27272a' }}>
+                            {activeTraceModal.trace.response_body?.choices?.[0]?.message?.content ||
+                              activeTraceModal.trace.response_body?.candidates?.[0]?.content?.parts?.[0]?.text ||
+                              activeTraceModal.trace.response_raw_text ||
+                              '"OK"'}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Endpoint URL */}
+                      <div>
+                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#71717a', fontWeight: 700, marginBottom: '4px' }}>
+                          TARGET URL
+                        </div>
+                        <div className="mono" style={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: '11px', color: '#38bdf8' }}>
+                          {activeTraceModal.trace.endpoint_url}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: REQUEST PAYLOAD */}
+                  {activeTraceModal.activeTab === 'request' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: 600 }}>
+                          Exact HTTP Request Body Sent:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(JSON.stringify(activeTraceModal.trace?.request_body, null, 2), 'req')}
+                          style={{
+                            background: '#27272a',
+                            border: '1px solid #3f3f46',
+                            color: '#ffffff',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '3px 8px',
+                            fontSize: '10px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {copiedKey === 'req' ? '✓ Copied!' : 'Copy Request JSON'}
+                        </button>
+                      </div>
+
+                      <pre
+                        className="mono"
+                        style={{
+                          background: '#09090b',
+                          border: '1px solid #27272a',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px',
+                          fontSize: '11px',
+                          color: '#e4e4e7',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {JSON.stringify(activeTraceModal.trace.request_body, null, 2)}
+                      </pre>
+
+                      <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: 600, marginTop: '8px' }}>
+                        Request Headers:
+                      </span>
+                      <pre
+                        className="mono"
+                        style={{
+                          background: '#09090b',
+                          border: '1px solid #27272a',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px',
+                          fontSize: '11px',
+                          color: '#a1a1aa',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {JSON.stringify(activeTraceModal.trace.request_headers, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* TAB 3: RAW RESPONSE */}
+                  {activeTraceModal.activeTab === 'response' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: 600 }}>
+                          Exact HTTP Response Body Received:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(JSON.stringify(activeTraceModal.trace?.response_body || activeTraceModal.trace?.response_raw_text, null, 2), 'res')}
+                          style={{
+                            background: '#27272a',
+                            border: '1px solid #3f3f46',
+                            color: '#ffffff',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '3px 8px',
+                            fontSize: '10px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {copiedKey === 'res' ? '✓ Copied!' : 'Copy Response JSON'}
+                        </button>
+                      </div>
+
+                      <pre
+                        className="mono"
+                        style={{
+                          background: '#09090b',
+                          border: '1px solid #27272a',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px',
+                          fontSize: '11px',
+                          color: '#e4e4e7',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {activeTraceModal.trace.response_body
+                          ? JSON.stringify(activeTraceModal.trace.response_body, null, 2)
+                          : activeTraceModal.trace.response_raw_text || '// No response body'}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

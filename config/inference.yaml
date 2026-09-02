@@ -38,7 +38,92 @@ inference_providers:
       X-Title: Winnow
 
 models:
-  # ================= Active / Frontier Models =================
+  # ================= 1. Active Free Tier Models (0-Cost Budget) =================
+  - id: or-glm-5-2-free
+    provider: openrouter
+    model_string: z-ai/glm-5.2:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 256000
+    benchmark_hint: "z-ai/glm-5.2"
+    cost: free
+
+  - id: or-minimax-m3-free
+    provider: openrouter
+    model_string: minimax/minimax-m3:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 1048576
+    benchmark_hint: "minimax/minimax-m3:free"
+    cost: free
+
+  - id: or-inkling-free
+    provider: openrouter
+    model_string: thinkingmachines/inkling:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 1048576
+    benchmark_hint: "thinkingmachines/inkling:free"
+    cost: free
+
+  - id: or-nemotron-3-ultra-free
+    provider: openrouter
+    model_string: nvidia/nemotron-3-ultra-550b-a55b:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 1000000
+    benchmark_hint: "nvidia/nemotron-3-ultra-550b-a55b"
+    cost: free
+
+  - id: or-laguna-s2-1-free
+    provider: openrouter
+    model_string: poolside/laguna-s-2.1:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 262144
+    benchmark_hint: "poolside/laguna-s-2.1"
+    cost: free
+
+  - id: or-gemma-4-31b-free
+    provider: openrouter
+    model_string: google/gemma-4-31b-it:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 262144
+    benchmark_hint: "google/gemma-4-31b-it"
+    cost: free
+
+  - id: or-free-router
+    provider: openrouter
+    model_string: openrouter/free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: false
+      max_context: 200000
+    benchmark_hint: "openrouter/free"
+    cost: free
+
+  # ================= 2. Frontier Intelligence Models =================
   - id: gemini-3.7-flash-high
     provider: gemini
     model_string: gemini-3.7-flash
@@ -50,34 +135,6 @@ models:
       max_context: 1000000
       thinking_budget: 8192
       reasoning_effort: high
-    benchmark_hint: "google/gemini-3.7-flash"
-    cost: standard
-
-  - id: gemini-3.7-flash-mid
-    provider: gemini
-    model_string: gemini-3.7-flash
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-      thinking_budget: 4096
-      reasoning_effort: medium
-    benchmark_hint: "google/gemini-3.7-flash"
-    cost: standard
-
-  - id: gemini-3.7-flash-low
-    provider: gemini
-    model_string: gemini-3.7-flash
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-      thinking_budget: 1024
-      reasoning_effort: low
     benchmark_hint: "google/gemini-3.7-flash"
     cost: standard
 
@@ -105,40 +162,16 @@ models:
     benchmark_hint: "google/gemini-3.6-flash"
     cost: standard
 
-  - id: gemini-3.5-flash
-    provider: gemini
-    model_string: gemini-3.5-flash
+  - id: or-glm-5-3-flash
+    provider: openrouter
+    model_string: z-ai/glm-5.3-flash
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
-      max_context: 1000000
-    benchmark_hint: "google/gemini-3.5-flash-lite"
-    cost: standard
-
-  - id: gemini-3.1-flash-lite
-    provider: gemini
-    model_string: gemini-3.1-flash-lite-preview
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-    benchmark_hint: "google/gemini-3.1-flash-lite-preview"
-    cost: standard
-
-  - id: gemini-3-flash
-    provider: gemini
-    model_string: gemini-3-flash-preview
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-    benchmark_hint: "google/gemini-3-flash-preview"
+      max_context: 1310720
+    benchmark_hint: "z-ai/glm-5.3-flash"
     cost: standard
 
   - id: or-deepseek-v4-pro
@@ -165,40 +198,17 @@ models:
     benchmark_hint: "nvidia/nemotron-3-ultra-550b-a55b"
     cost: standard
 
-  - id: or-glm-5-2
-    provider: openrouter
-    model_string: z-ai/glm-5.2
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 128000
-    benchmark_hint: "z-ai/glm-5.2"
-    cost: standard
-
-  - id: or-laguna-s2-1
-    provider: openrouter
-    model_string: poolside/laguna-s-2.1
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 128000
-    benchmark_hint: "poolside/laguna-s-2.1"
-    cost: standard
-
-  - id: groq-gpt-120b
-    provider: groq
-    model_string: openai/gpt-oss-120b
+  # ================= 3. Ultra-Speed LPU & CS-3 Models =================
+  - id: cerebras-gemma4-31b
+    provider: cerebras
+    model_string: gemma-4-31b
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    benchmark_hint: "openai/gpt-oss-120b"
+    benchmark_hint: "google/gemma-4-31b-it"
     cost: standard
 
   - id: cerebras-gpt-120b
@@ -213,16 +223,16 @@ models:
     benchmark_hint: "openai/gpt-oss-120b"
     cost: standard
 
-  - id: cerebras-gemma4-31b
-    provider: cerebras
-    model_string: gemma-4-31b
+  - id: groq-gpt-120b
+    provider: groq
+    model_string: openai/gpt-oss-120b
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
       max_context: 131072
-    benchmark_hint: "google/gemma-4-31b-it"
+    benchmark_hint: "openai/gpt-oss-120b"
     cost: standard
 
   - id: groq-qwen-27b
@@ -249,7 +259,7 @@ models:
     benchmark_hint: "openai/gpt-oss-20b"
     cost: standard
 
-  # ================= Outdated / Legacy Section =================
+  # ================= 4. Outdated / Legacy Section =================
   - id: gemini-3.1-pro-legacy
     provider: gemini
     model_string: gemini-3.1-pro-preview
@@ -272,18 +282,6 @@ models:
       supports_json_schema: true
       max_context: 128000
     benchmark_hint: "mistralai/mistral-nemo"
-    cost: standard
-
-  - id: nim-nemotron-super-49b-legacy
-    provider: nim
-    model_string: nvidia/llama-3.3-nemotron-super-49b-v1.5
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 131072
-    benchmark_hint: "nvidia/nemotron-3-super"
     cost: standard
 
   - id: or-gemma-4-26b-legacy
@@ -320,17 +318,17 @@ model_policy:
   fallback_chain:
     - gemini-3.7-flash-high
     - gemini-3.7-flash
+    - or-glm-5-3-flash
+    - or-glm-5-2-free
+    - or-minimax-m3-free
+    - or-nemotron-3-ultra-free
+    - or-inkling-free
     - or-deepseek-v4-pro
     - nim-nemotron-3-ultra
-    - groq-gpt-120b
-    - or-laguna-s2-1
     - cerebras-gemma4-31b
-    - or-glm-5-2
-    - cerebras-gpt-120b
-    - groq-qwen-27b
-    - gemini-3.5-flash
-    - gemini-3.1-pro-legacy
-    - nim-mistral-nemotron-legacy
-    - or-gemma-4-26b-legacy
+    - groq-gpt-120b
+    - or-laguna-s2-1-free
+    - or-gemma-4-31b-free
+    - or-free-router
   embed_model: gemini-3.7-flash
   refresh_metrics_every_hours: 24

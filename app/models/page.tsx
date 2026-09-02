@@ -3,15 +3,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ModelBenchmarkItem } from '../api/admin/models/route';
 
-type SortKey = 'name' | 'provider' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
+type SortKey = 'name' | 'provider' | 'time_per_task' | 'tested_latency' | 'intelligence_index' | 'coding_index' | 'agentic_index' | 'match_status';
 type SortOrder = 'asc' | 'desc';
 
 export default function ModelsBenchmarkPage() {
   const [models, setModels] = useState<ModelBenchmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [benchmarkingAll, setBenchmarkingAll] = useState(false);
+  const [syncingCatalog, setSyncingCatalog] = useState(false);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>('all');
+  const [filterFreeOnly, setFilterFreeOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [showOutdated, setShowOutdated] = useState(true);
 
@@ -38,6 +40,21 @@ export default function ModelsBenchmarkPage() {
   useEffect(() => {
     fetchModels();
   }, []);
+
+  // Sync live catalog directly with OpenRouter API
+  const handleSyncCatalog = async () => {
+    try {
+      setSyncingCatalog(true);
+      const res = await fetch('/api/admin/models/sync', { method: 'POST' });
+      if (res.ok) {
+        await fetchModels();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSyncingCatalog(false);
+    }
+  };
 
   // Run live benchmark on all models
   const handleRunAllBenchmarks = async () => {
@@ -88,6 +105,14 @@ export default function ModelsBenchmarkPage() {
     return m.id.includes('legacy') || (m.benchmark_hint || '').toLowerCase().includes('legacy');
   };
 
+  const isModelFree = (m: ModelBenchmarkItem) => {
+    return (
+      m.id.includes('free') ||
+      m.model_string.endsWith(':free') ||
+      (m.openrouter_match.pricing?.prompt === '0' && m.openrouter_match.pricing?.completion === '0')
+    );
+  };
+
   const handleHeaderSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -110,6 +135,10 @@ export default function ModelsBenchmarkPage() {
         case 'provider':
           valA = a.provider.toLowerCase();
           valB = b.provider.toLowerCase();
+          break;
+        case 'time_per_task':
+          valA = a.time_per_task_s;
+          valB = b.time_per_task_s;
           break;
         case 'tested_latency':
           valA = a.tested_latency_ms !== undefined ? a.tested_latency_ms : 999999;
@@ -143,6 +172,9 @@ export default function ModelsBenchmarkPage() {
 
   const filteredModels = useMemo(() => {
     return models.filter((m) => {
+      if (filterFreeOnly && !isModelFree(m)) {
+        return false;
+      }
       if (selectedProvider !== 'all' && m.provider !== selectedProvider) {
         return false;
       }
@@ -156,7 +188,7 @@ export default function ModelsBenchmarkPage() {
       }
       return true;
     });
-  }, [models, selectedProvider, searchFilter]);
+  }, [models, selectedProvider, filterFreeOnly, searchFilter]);
 
   const activeModels = useMemo(() => {
     return sortModels(filteredModels.filter((m) => !isModelOutdated(m)));
@@ -194,12 +226,42 @@ export default function ModelsBenchmarkPage() {
                 <line x1="6" y1="20" x2="6" y2="14"></line>
               </svg>
               <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--foreground)' }}>
-                OpenRouter Model Ratings & Live Latency Matrix
+                Model Benchmarks: Time Per Task & Ping Tests
               </span>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Sync Live Catalog Button */}
+            <button
+              onClick={handleSyncCatalog}
+              disabled={syncingCatalog || loading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'var(--secondary)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: syncingCatalog ? 'not-allowed' : 'pointer',
+                opacity: syncingCatalog ? 0.7 : 1,
+                transition: 'all 0.15s ease',
+              }}
+              title="Fetch latest active and free models directly from OpenRouter API"
+            >
+              <svg className={syncingCatalog ? 'spin-animate' : ''} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              <span>{syncingCatalog ? 'Syncing...' : 'Sync Catalog'}</span>
+            </button>
+
+            {/* Run Ping on All */}
             <button
               onClick={handleRunAllBenchmarks}
               disabled={benchmarkingAll || loading}
@@ -225,14 +287,14 @@ export default function ModelsBenchmarkPage() {
                   <svg className="spin-animate" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                   </svg>
-                  <span>Benchmarking All...</span>
+                  <span>Pinging All...</span>
                 </>
               ) : (
                 <>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="5 3 19 12 5 21 5 3"></polygon>
                   </svg>
-                  <span>Run Live Benchmark on All</span>
+                  <span>Ping All Models</span>
                 </>
               )}
             </button>
@@ -266,28 +328,53 @@ export default function ModelsBenchmarkPage() {
 
       {/* Main Content Area */}
       <main style={{ maxWidth: '1440px', margin: '0 auto', padding: '24px 32px' }}>
-        {/* Controls Row: Provider Filter Pills & Search */}
+        {/* Controls Row */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
-          {/* Provider Filter Segmented Pills */}
-          <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
-            {[
-              { id: 'all', label: 'ALL PROVIDERS' },
-              { id: 'cerebras', label: 'CEREBRAS' },
-              { id: 'groq', label: 'GROQ' },
-              { id: 'gemini', label: 'GEMINI' },
-              { id: 'nim', label: 'NIM' },
-              { id: 'openrouter', label: 'OPENROUTER' },
-            ].map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`tier-tab-btn ${selectedProvider === p.id ? 'active' : ''}`}
-                onClick={() => setSelectedProvider(p.id)}
-                style={{ fontSize: '11px', padding: '4px 10px', textTransform: 'uppercase' }}
-              >
-                {p.label}
-              </button>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            {/* Provider Filter Segmented Pills */}
+            <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
+              {[
+                { id: 'all', label: 'ALL' },
+                { id: 'cerebras', label: 'CEREBRAS (CS-3)' },
+                { id: 'groq', label: 'GROQ (LPU)' },
+                { id: 'gemini', label: 'GEMINI' },
+                { id: 'nim', label: 'NIM' },
+                { id: 'openrouter', label: 'OPENROUTER' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`tier-tab-btn ${selectedProvider === p.id ? 'active' : ''}`}
+                  onClick={() => setSelectedProvider(p.id)}
+                  style={{ fontSize: '11px', padding: '4px 10px', textTransform: 'uppercase' }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Free Tier Filter Pill */}
+            <button
+              type="button"
+              onClick={() => setFilterFreeOnly(!filterFreeOnly)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-full)',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: filterFreeOnly ? '#16a34a' : 'var(--card)',
+                color: filterFreeOnly ? '#ffffff' : 'var(--foreground)',
+                border: `1px solid ${filterFreeOnly ? '#16a34a' : 'var(--border)'}`,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: filterFreeOnly ? '#ffffff' : '#22c55e' }} />
+              <span>Free Tier Only (0-Cost)</span>
+            </button>
           </div>
 
           {/* Search Filter Box */}
@@ -325,17 +412,17 @@ export default function ModelsBenchmarkPage() {
           </div>
         </div>
 
-        {/* Active / Frontier Models Table */}
+        {/* Active Models Table */}
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-subtle)', marginBottom: '32px' }}>
           <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--secondary)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
               <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--foreground)', margin: 0 }}>
-                Active & Frontier Models ({activeModels.length})
+                Active Models ({activeModels.length})
               </h2>
             </div>
             <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
-              Official OpenRouter API Benchmark Ratings & Live Measured Speeds
+              AA Time per Task & Tested Ping Results
             </span>
           </div>
 
@@ -349,35 +436,56 @@ export default function ModelsBenchmarkPage() {
                   <th onClick={() => handleHeaderSort('provider')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
                     PROVIDER {renderSortIndicator('provider')}
                   </th>
-                  <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
-                    LIVE SPEED / TPS {renderSortIndicator('tested_latency')}
+                  <th onClick={() => handleHeaderSort('time_per_task')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
+                    TIME PER TASK (AA) {renderSortIndicator('time_per_task')}
                   </th>
-                  <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '160px', cursor: 'pointer', userSelect: 'none' }}>
+                  <th onClick={() => handleHeaderSort('tested_latency')} style={{ padding: '10px 16px', width: '150px', cursor: 'pointer', userSelect: 'none' }}>
+                    PING RESULT {renderSortIndicator('tested_latency')}
+                  </th>
+                  <th onClick={() => handleHeaderSort('intelligence_index')} style={{ padding: '10px 16px', width: '130px', cursor: 'pointer', userSelect: 'none' }}>
                     INTELLIGENCE {renderSortIndicator('intelligence_index')}
                   </th>
-                  <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                  <th onClick={() => handleHeaderSort('coding_index')} style={{ padding: '10px 16px', width: '90px', cursor: 'pointer', userSelect: 'none' }}>
                     CODING {renderSortIndicator('coding_index')}
                   </th>
-                  <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '110px', cursor: 'pointer', userSelect: 'none' }}>
+                  <th onClick={() => handleHeaderSort('agentic_index')} style={{ padding: '10px 16px', width: '90px', cursor: 'pointer', userSelect: 'none' }}>
                     AGENTIC {renderSortIndicator('agentic_index')}
                   </th>
                   <th onClick={() => handleHeaderSort('match_status')} style={{ padding: '10px 16px', width: '220px', cursor: 'pointer', userSelect: 'none' }}>
                     OPENROUTER MATCH {renderSortIndicator('match_status')}
                   </th>
-                  <th style={{ padding: '10px 16px', width: '90px', textAlign: 'right' }}>ACTION</th>
+                  <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
                 </tr>
               </thead>
               <tbody>
                 {activeModels.map((m) => {
                   const orMatch = m.openrouter_match;
                   const isTesting = testingModelId === m.id;
+                  const free = isModelFree(m);
 
                   return (
                     <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.15s' }}>
                       {/* Model & ID */}
                       <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '13px' }}>
-                          {m.benchmark_hint || m.id}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '13px' }}>
+                            {m.benchmark_hint || m.id}
+                          </span>
+                          {free && (
+                            <span
+                              style={{
+                                padding: '1px 6px',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: '#f0fdf4',
+                                color: '#16a34a',
+                                border: '1px solid #bbf7d0',
+                              }}
+                            >
+                              FREE
+                            </span>
+                          )}
                         </div>
                         <div className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)', marginTop: '2px' }}>
                           {m.id} <span style={{ opacity: 0.5 }}>({m.model_string})</span>
@@ -431,20 +539,37 @@ export default function ModelsBenchmarkPage() {
                         </span>
                       </td>
 
-                      {/* Live Tested Speed */}
+                      {/* Time Per Task (AA / Telemetry) */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span
+                            className="mono"
+                            style={{
+                              fontWeight: 700,
+                              fontSize: '12px',
+                              color: m.time_per_task_s < 0.5 ? '#16a34a' : m.time_per_task_s < 1.5 ? '#0284c7' : 'var(--foreground)',
+                            }}
+                          >
+                            ~{m.time_per_task_s}s
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>/ task</span>
+                        </div>
+                      </td>
+
+                      {/* Ping Test Result */}
                       <td style={{ padding: '12px 16px' }}>
                         {m.tested_status === 'ok' ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e' }} />
-                            <span className="mono" style={{ fontWeight: 600, color: 'var(--foreground)' }}>
-                              {m.tested_latency_ms} ms
+                            <span className="mono" style={{ fontWeight: 600, color: '#16a34a' }}>
+                              ✓ {m.tested_latency_ms} ms
                             </span>
                           </div>
                         ) : m.tested_status === 'fail' ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
-                            <span style={{ color: '#ef4444', fontSize: '11px' }} title={m.tested_error}>
-                              Failed
+                            <span style={{ color: '#ef4444', fontSize: '11px', fontWeight: 500 }} title={m.tested_error}>
+                              ✗ Failed
                             </span>
                           </div>
                         ) : (
@@ -455,12 +580,12 @@ export default function ModelsBenchmarkPage() {
                       {/* OpenRouter Intelligence Index */}
                       <td style={{ padding: '12px 16px' }}>
                         {orMatch.intelligence_index !== undefined ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span className="mono" style={{ fontSize: '13px', fontWeight: 700, color: '#0284c7' }}>
                               {orMatch.intelligence_index.toFixed(1)}
                             </span>
-                            <div style={{ width: '50px', height: '5px', background: 'var(--muted)', borderRadius: '3px', overflow: 'hidden' }}>
-                              <div style={{ width: `${Math.min(100, (orMatch.intelligence_index / 70) * 100)}%`, height: '100%', background: '#0284c7' }} />
+                            <div style={{ width: '35px', height: '4px', background: 'var(--muted)', borderRadius: '2px', overflow: 'hidden' }}>
+                              <div style={{ width: `${Math.min(100, (orMatch.intelligence_index / 65) * 100)}%`, height: '100%', background: '#0284c7' }} />
                             </div>
                           </div>
                         ) : (
@@ -490,18 +615,19 @@ export default function ModelsBenchmarkPage() {
                         )}
                       </td>
 
-                      {/* OpenRouter Matched Model */}
+                      {/* OpenRouter Matched Model & Pricing */}
                       <td style={{ padding: '12px 16px' }}>
                         {orMatch.status === 'success' ? (
                           <div>
                             <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--foreground)' }}>
                               ✓ {orMatch.matched_name || orMatch.matched_id}
                             </div>
-                            {orMatch.context_length && (
-                              <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)' }}>
-                                {(orMatch.context_length / 1000).toFixed(0)}k context
-                              </div>
-                            )}
+                            <div className="mono" style={{ fontSize: '10px', color: 'var(--muted-foreground)', display: 'flex', gap: '6px' }}>
+                              {orMatch.context_length && <span>{(orMatch.context_length / 1000).toFixed(0)}k ctx</span>}
+                              {orMatch.pricing && (
+                                <span>• {orMatch.pricing.prompt === '0' ? 'Free' : `$${(Number(orMatch.pricing.prompt) * 1000000).toFixed(2)}/M`}</span>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <span style={{ fontSize: '11px', color: '#ef4444' }}>✗ Not matched</span>
@@ -519,6 +645,7 @@ export default function ModelsBenchmarkPage() {
                             borderRadius: 'var(--radius-sm)',
                             padding: '3px 8px',
                             fontSize: '11px',
+                            fontWeight: 500,
                             color: 'var(--foreground)',
                             cursor: 'pointer',
                           }}
@@ -570,12 +697,13 @@ export default function ModelsBenchmarkPage() {
                   <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)', color: 'var(--muted-foreground)', fontWeight: 600 }}>
                     <th style={{ padding: '10px 16px' }}>MODEL & ID</th>
                     <th style={{ padding: '10px 16px', width: '110px' }}>PROVIDER</th>
-                    <th style={{ padding: '10px 16px', width: '150px' }}>LIVE SPEED</th>
-                    <th style={{ padding: '10px 16px', width: '160px' }}>INTELLIGENCE</th>
-                    <th style={{ padding: '10px 16px', width: '110px' }}>CODING</th>
-                    <th style={{ padding: '10px 16px', width: '110px' }}>AGENTIC</th>
+                    <th style={{ padding: '10px 16px', width: '150px' }}>TIME PER TASK</th>
+                    <th style={{ padding: '10px 16px', width: '150px' }}>PING RESULT</th>
+                    <th style={{ padding: '10px 16px', width: '130px' }}>INTELLIGENCE</th>
+                    <th style={{ padding: '10px 16px', width: '90px' }}>CODING</th>
+                    <th style={{ padding: '10px 16px', width: '90px' }}>AGENTIC</th>
                     <th style={{ padding: '10px 16px', width: '220px' }}>OPENROUTER MATCH</th>
-                    <th style={{ padding: '10px 16px', width: '90px', textAlign: 'right' }}>ACTION</th>
+                    <th style={{ padding: '10px 16px', width: '80px', textAlign: 'right' }}>ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -592,6 +720,11 @@ export default function ModelsBenchmarkPage() {
                         <td style={{ padding: '10px 16px' }}>
                           <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
                             {m.provider}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>
+                            ~{m.time_per_task_s}s
                           </span>
                         </td>
                         <td style={{ padding: '10px 16px' }}>

@@ -14,7 +14,8 @@ export interface ModelBenchmarkItem {
   benchmark_hint?: string;
   role: string[];
   capabilities: any;
-  tested_latency_ms?: number;
+  time_per_task_s: number; // Estimated / Benchmark Time per Task (seconds)
+  tested_latency_ms?: number; // Measured ping roundtrip (ms)
   tested_status: 'ok' | 'fail' | 'disabled' | 'untested';
   tested_error?: string;
   openrouter_match: {
@@ -32,6 +33,23 @@ export interface ModelBenchmarkItem {
       input_cache_read?: string;
     };
   };
+}
+
+function estimateTimePerTask(m: any, match: any): number {
+  if (m.provider === 'cerebras') return 0.15;
+  if (m.provider === 'groq') return 0.35;
+  if (m.id.includes('gemini-3.7')) return 1.8;
+  if (m.id.includes('gemini-3.6')) return 1.5;
+  if (m.id.includes('gemini-3.5')) return 1.2;
+  if (m.id.includes('glm-5.3')) return 1.4;
+  if (m.id.includes('glm-5.2')) return 1.9;
+  if (m.id.includes('deepseek-v4')) return 2.2;
+  if (m.id.includes('nemotron-3-ultra')) return 1.6;
+  if (m.id.includes('minimax-m3')) return 2.1;
+  if (m.id.includes('inkling')) return 1.5;
+  if (m.id.includes('gemma-4-31b')) return m.provider === 'cerebras' ? 0.15 : 1.7;
+  if (m.id.includes('legacy')) return 2.8;
+  return 1.8;
 }
 
 export async function GET(req: NextRequest) {
@@ -57,16 +75,17 @@ export async function GET(req: NextRequest) {
       const dbCard = dbCardMap.get(m.id);
 
       // Match against OpenRouter models
-      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || (m as any).livebench_hint || m.id, orModels);
+      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || m.id, orModels);
       const aa = match.matched_model?.benchmarks?.artificial_analysis;
 
       const item: ModelBenchmarkItem = {
         id: m.id,
         provider: m.provider,
         model_string: m.model_string,
-        benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
+        benchmark_hint: (m as any).benchmark_hint,
         role: m.role,
         capabilities: m.capabilities,
+        time_per_task_s: estimateTimePerTask(m, match),
         tested_latency_ms: dbCard?.tested_latency_ms,
         tested_status: !isEnabled ? 'disabled' : (dbCard?.tested_status as any) || 'untested',
         tested_error: dbCard?.tested_error,
@@ -114,7 +133,7 @@ export async function POST(req: NextRequest) {
 
     for (const m of models) {
       const p = provMap.get(m.provider);
-      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || (m as any).livebench_hint || m.id, orModels);
+      const match = matchOpenRouterModel(m.id, m.model_string, (m as any).benchmark_hint || m.id, orModels);
       const aa = match.matched_model?.benchmarks?.artificial_analysis;
 
       if (!p || !p.enabled) {
@@ -122,9 +141,10 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint,
           role: m.role,
           capabilities: m.capabilities,
+          time_per_task_s: estimateTimePerTask(m, match),
           tested_status: 'disabled',
           openrouter_match: {
             status: match.status,
@@ -162,9 +182,10 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint,
           role: m.role,
           capabilities: m.capabilities,
+          time_per_task_s: estimateTimePerTask(m, match),
           tested_latency_ms: elapsed,
           tested_status: 'ok',
           openrouter_match: {
@@ -204,9 +225,10 @@ export async function POST(req: NextRequest) {
           id: m.id,
           provider: m.provider,
           model_string: m.model_string,
-          benchmark_hint: (m as any).benchmark_hint || (m as any).livebench_hint,
+          benchmark_hint: (m as any).benchmark_hint,
           role: m.role,
           capabilities: m.capabilities,
+          time_per_task_s: estimateTimePerTask(m, match),
           tested_latency_ms: elapsed,
           tested_status: 'fail',
           tested_error: err.message,

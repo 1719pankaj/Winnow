@@ -70,7 +70,11 @@ export class SearchOrchestrator {
   }
 
   private resolveInferenceAdapter(modelId: string, config: FullWinnowConfig): { adapter: InferenceAdapter; modelId: string; provider: string } {
-    const modelConfig = config.inference.models.find((m) => m.id === modelId) || config.inference.models[0];
+    const activeFallbackId = config.inference.model_policy.fallback_chain[0] || 'or-gemini-3.7-flash';
+    const modelConfig =
+      config.inference.models.find((m) => m.id === modelId) ||
+      config.inference.models.find((m) => m.id === activeFallbackId) ||
+      config.inference.models[0];
     const providerConfig = config.inference.inference_providers.find((p) => p.name === modelConfig.provider) || config.inference.inference_providers[0];
     return {
       adapter: new InferenceAdapter(providerConfig, modelConfig),

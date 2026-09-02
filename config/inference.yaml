@@ -32,18 +32,6 @@ inference_providers:
 
 models:
   # ================= 1. Active Free Tier Models (0-Cost Budget) =================
-  - id: or-glm-5-2-free
-    provider: openrouter
-    model_string: z-ai/glm-5.2:free
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 256000
-    benchmark_hint: "z-ai/glm-5.2"
-    cost: free
-
   - id: or-minimax-m3-free
     provider: openrouter
     model_string: minimax/minimax-m3:free
@@ -273,6 +261,18 @@ models:
       supports_json_schema: false
       max_context: 128000
     benchmark_hint: "dots-studio/dots-3-note-preview:free"
+    cost: free
+
+  - id: or-glm-5-2-free
+    provider: openrouter
+    model_string: z-ai/glm-5.2:free
+    role: [rerank, plan]
+    capabilities:
+      supports_tools: true
+      supports_parallel_tools: true
+      supports_json_schema: true
+      max_context: 256000
+    benchmark_hint: "z-ai/glm-5.2:free (deprecated)"
     cost: free
 
 model_policy:

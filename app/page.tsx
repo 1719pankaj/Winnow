@@ -352,28 +352,19 @@ export default function HomePage() {
                   style={{ maxWidth: '280px' }}
                 >
                   <option value="auto">Auto: Default for {discreteTier.toUpperCase()}</option>
-                  <optgroup label="Google Gemini">
-                    <option value="or-gemini-3.7-flash">Gemini 3.7 Flash (OpenRouter 56.0)</option>
-                    <option value="gemini-3.5-flash">Gemini 3.5 Flash (37.4)</option>
-                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (25.6)</option>
-                  </optgroup>
-                  <optgroup label="OpenRouter Active Free Tier">
-                    <option value="or-glm-5-2-free">Z.ai GLM 5.2 (Free 52.6)</option>
+                  <optgroup label="Frontier Intelligence & Production">
+                    <option value="or-glm-5-3-flash">Z.ai GLM 5.3 Flash (57.5)</option>
+                    <option value="or-gemini-3.7-flash">Google Gemini 3.7 Flash (56.0)</option>
                     <option value="or-minimax-m3-free">MiniMax M3 (Free 45.4)</option>
-                    <option value="or-inkling-free">ThinkingMachines Inkling (Free 42.3)</option>
                     <option value="or-nemotron-3-ultra-free">Nemotron 3 Ultra (Free 38.3)</option>
+                    <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B (38.3)</option>
+                    <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813 (45.3)</option>
                     <option value="or-gemma-4-31b-free">Gemma 4 31B (Free 29.7)</option>
                   </optgroup>
-                  <optgroup label="Frontier Intelligence">
-                    <option value="or-glm-5-3-flash">Z.ai GLM 5.3 Flash (57.5)</option>
-                    <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813 (45.3)</option>
-                    <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B (38.3)</option>
-                    <option value="or-laguna-s2-1-free">Poolside Laguna S 2.1 (Free)</option>
-                  </optgroup>
                   <optgroup label="Groq Ultra Speed (LPU)">
-                    <option value="groq-gpt-120b">Groq GPT-OSS 120B (24.1)</option>
-                    <option value="groq-qwen-27b">Groq Qwen 3.6 27B (37.7)</option>
-                    <option value="groq-gpt-20b">Groq GPT-OSS 20B (15.2)</option>
+                    <option value="groq-gpt-120b">Groq GPT-OSS 120B (~0.35s)</option>
+                    <option value="groq-qwen-27b">Groq Qwen 3.6 27B (~0.35s)</option>
+                    <option value="groq-gpt-20b">Groq GPT-OSS 20B (~0.3s)</option>
                   </optgroup>
                   <optgroup label="Legacy / Outdated">
                     <option value="gemini-3.1-pro-legacy">Gemini 3.1 Pro (Legacy)</option>

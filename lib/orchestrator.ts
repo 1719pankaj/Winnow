@@ -10,6 +10,7 @@ import { stageRerank, RerankOutput } from './stages/rerank';
 import { stageAssemble } from './stages/assemble';
 import { store } from './store';
 import { eventHub } from './events';
+import { resolveDynamicFallbackChain } from './dynamic_chain';
 import {
   Trace,
   Candidate,
@@ -93,14 +94,15 @@ export class SearchOrchestrator {
 
     const t0 = Date.now();
 
-    // 1. Resolve Initial Inference Provider & Model
-    const requestedModelId = options.modelOverride || config.inference.model_policy.fallback_chain[0];
-    let { adapter: inferenceAdapter, modelId, provider } = this.resolveInferenceAdapter(requestedModelId, config);
-
-    const fallbackCandidateList = [
-      modelId,
-      ...config.inference.model_policy.fallback_chain.filter((id) => id !== modelId),
-    ];
+    // 1. Resolve Dynamic Fallback Chain strictly enforcing user governance rules:
+    // - NO disabled models
+    // - NO outdated/legacy models
+    // - NO incompatible models
+    // - NO endpoints failing or taking > 3.0 seconds to return OK
+    const dynamicResolution = await resolveDynamicFallbackChain(options.modelOverride, config);
+    let modelId = dynamicResolution.primaryModelId;
+    let { adapter: inferenceAdapter, provider } = this.resolveInferenceAdapter(modelId, config);
+    const fallbackCandidateList = dynamicResolution.chain;
 
     // Resolve Search Adapters
     const searchAdapters = config.providers
@@ -112,6 +114,13 @@ export class SearchOrchestrator {
     }
 
     const degradedReasons: { reason: string; detail?: string }[] = [];
+
+    if (dynamicResolution.disqualifiedRequestedModel) {
+      degradedReasons.push({
+        reason: 'model_policy_override',
+        detail: `Disqualified model "${dynamicResolution.disqualifiedRequestedModel}" (${dynamicResolution.disqualificationReason}). Dynamically switched to "${modelId}".`,
+      });
+    }
 
     // Initialize Trace in Database
     const initialTrace: Trace = {

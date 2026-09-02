@@ -6,13 +6,6 @@ inference_providers:
     timeout_ms: 20000
     limits: {rpm: 60, rpd: 10000, concurrent: 6}
 
-  - name: cerebras
-    enabled: true
-    base_url: https://api.cerebras.ai/v1
-    api_key: ${CEREBRAS_KEY}
-    timeout_ms: 20000
-    limits: {rpm: 60, rpd: 10000, concurrent: 6}
-
   - name: gemini
     enabled: true
     base_url: https://generativelanguage.googleapis.com/v1beta
@@ -124,42 +117,16 @@ models:
     cost: free
 
   # ================= 2. Frontier Intelligence Models =================
-  - id: gemini-3.7-flash-high
-    provider: gemini
-    model_string: gemini-3.7-flash
+  - id: or-gemini-3.7-flash
+    provider: openrouter
+    model_string: google/gemini-3.7-flash
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
-      max_context: 1000000
-      thinking_budget: 8192
-      reasoning_effort: high
+      max_context: 1048576
     benchmark_hint: "google/gemini-3.7-flash"
-    cost: standard
-
-  - id: gemini-3.7-flash
-    provider: gemini
-    model_string: gemini-3.7-flash
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-    benchmark_hint: "google/gemini-3.7-flash"
-    cost: standard
-
-  - id: gemini-3.6-flash
-    provider: gemini
-    model_string: gemini-3.6-flash
-    role: [rerank, plan]
-    capabilities:
-      supports_tools: true
-      supports_parallel_tools: true
-      supports_json_schema: true
-      max_context: 1000000
-    benchmark_hint: "google/gemini-3.6-flash"
     cost: standard
 
   - id: or-glm-5-3-flash
@@ -198,31 +165,31 @@ models:
     benchmark_hint: "nvidia/nemotron-3-ultra-550b-a55b"
     cost: standard
 
-  # ================= 3. Ultra-Speed LPU & CS-3 Models =================
-  - id: cerebras-gemma4-31b
-    provider: cerebras
-    model_string: gemma-4-31b
+  - id: gemini-3.5-flash
+    provider: gemini
+    model_string: gemini-3.5-flash
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
-      max_context: 131072
-    benchmark_hint: "google/gemma-4-31b-it"
+      max_context: 1000000
+    benchmark_hint: "google/gemini-3.5-flash-lite"
     cost: standard
 
-  - id: cerebras-gpt-120b
-    provider: cerebras
-    model_string: gpt-oss-120b
+  - id: gemini-3.1-flash-lite
+    provider: gemini
+    model_string: gemini-3.1-flash-lite-preview
     role: [rerank, plan]
     capabilities:
       supports_tools: true
       supports_parallel_tools: true
       supports_json_schema: true
-      max_context: 131072
-    benchmark_hint: "openai/gpt-oss-120b"
+      max_context: 1000000
+    benchmark_hint: "google/gemini-3.1-flash-lite-preview"
     cost: standard
 
+  # ================= 3. Ultra-Speed LPU Models (Groq) =================
   - id: groq-gpt-120b
     provider: groq
     model_string: openai/gpt-oss-120b
@@ -316,19 +283,19 @@ model_policy:
     rerank: {order_by: intelligence, min_speed_tps: 20}
     plan: {order_by: intelligence}
   fallback_chain:
-    - gemini-3.7-flash-high
-    - gemini-3.7-flash
     - or-glm-5-3-flash
+    - or-gemini-3.7-flash
     - or-glm-5-2-free
     - or-minimax-m3-free
     - or-nemotron-3-ultra-free
     - or-inkling-free
-    - or-deepseek-v4-pro
-    - nim-nemotron-3-ultra
-    - cerebras-gemma4-31b
     - groq-gpt-120b
+    - groq-qwen-27b
+    - nim-nemotron-3-ultra
+    - or-deepseek-v4-pro
+    - gemini-3.5-flash
     - or-laguna-s2-1-free
     - or-gemma-4-31b-free
     - or-free-router
-  embed_model: gemini-3.7-flash
+  embed_model: or-gemini-3.7-flash
   refresh_metrics_every_hours: 24

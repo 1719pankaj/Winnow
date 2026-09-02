@@ -40,16 +40,16 @@ export default function HomePage() {
   const activeModels: ActiveModelOption[] = useMemo(() => {
     if (!modelItems || modelItems.length === 0) {
       return [
-        { id: 'cerebras-gemma4-31b', label: 'Cerebras Gemma 4 31B', provider: 'cerebras', intelligenceIndex: 29.7 },
-        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B', provider: 'groq', intelligenceIndex: 37.7 },
+        { id: 'groq-gpt-20b', label: 'Groq GPT-OSS 20B', provider: 'groq', intelligenceIndex: 15.2 },
         { id: 'groq-gpt-120b', label: 'Groq GPT-OSS 120B', provider: 'groq', intelligenceIndex: 24.1 },
-        { id: 'gemini-3.5-flash', label: 'Google Gemini 3.5 Flash', provider: 'gemini', intelligenceIndex: 37.4 },
-        { id: 'or-glm-5-2', label: 'Zhipu GLM 5.2', provider: 'openrouter', intelligenceIndex: 52.6 },
-        { id: 'or-laguna-s2-1', label: 'Poolside Laguna S 2.1', provider: 'openrouter', intelligenceIndex: 40.0 },
-        { id: 'gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'gemini', intelligenceIndex: 56.0 },
-        { id: 'nim-nemotron-3-ultra', label: 'NVIDIA Nemotron 3 Ultra 550B', provider: 'nim', intelligenceIndex: 38.3 },
-        { id: 'or-deepseek-v4-pro', label: 'DeepSeek V4 Pro 0813', provider: 'openrouter', intelligenceIndex: 45.3 },
-        { id: 'gemini-3.7-flash-high', label: 'Google Gemini 3.7 Flash (High Thinking)', provider: 'gemini', intelligenceIndex: 56.0 },
+        { id: 'groq-qwen-27b', label: 'Groq Qwen 3.6 27B', provider: 'groq', intelligenceIndex: 37.7 },
+        { id: 'or-gemma-4-31b-free', label: 'Gemma 4 31B (Free)', provider: 'openrouter', intelligenceIndex: 29.7 },
+        { id: 'or-nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (Free)', provider: 'openrouter', intelligenceIndex: 38.3 },
+        { id: 'or-inkling-free', label: 'ThinkingMachines Inkling (Free)', provider: 'openrouter', intelligenceIndex: 42.3 },
+        { id: 'or-minimax-m3-free', label: 'MiniMax M3 (Free)', provider: 'openrouter', intelligenceIndex: 45.4 },
+        { id: 'or-glm-5-2-free', label: 'Z.ai GLM 5.2 (Free)', provider: 'openrouter', intelligenceIndex: 52.6 },
+        { id: 'or-gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'openrouter', intelligenceIndex: 56.0 },
+        { id: 'or-glm-5-3-flash', label: 'Z.ai GLM 5.3 Flash', provider: 'openrouter', intelligenceIndex: 57.5 },
       ];
     }
 
@@ -65,8 +65,8 @@ export default function HomePage() {
 
   const fastModels = useMemo(() => {
     return [...activeModels].sort((a, b) => {
-      const pA = a.provider === 'cerebras' ? 0 : a.provider === 'groq' ? 1 : 2;
-      const pB = b.provider === 'cerebras' ? 0 : b.provider === 'groq' ? 1 : 2;
+      const pA = a.provider === 'groq' ? 0 : 1;
+      const pB = b.provider === 'groq' ? 0 : 1;
       if (pA !== pB) return pA - pB;
       return a.intelligenceIndex - b.intelligenceIndex;
     });
@@ -337,24 +337,24 @@ export default function HomePage() {
                 >
                   <option value="auto">Auto: Default for {discreteTier.toUpperCase()}</option>
                   <optgroup label="Google Gemini">
-                    <option value="gemini-3.7-flash-high">Gemini 3.7 Flash (High Thinking 56.0)</option>
-                    <option value="gemini-3.7-flash-mid">Gemini 3.7 Flash (Mid Thinking 56.0)</option>
-                    <option value="gemini-3.7-flash-low">Gemini 3.7 Flash (Low Thinking 56.0)</option>
-                    <option value="gemini-3.7-flash">Gemini 3.7 Flash (Standard 56.0)</option>
-                    <option value="gemini-3.6-flash">Gemini 3.6 Flash (51.6)</option>
+                    <option value="or-gemini-3.7-flash">Gemini 3.7 Flash (OpenRouter 56.0)</option>
                     <option value="gemini-3.5-flash">Gemini 3.5 Flash (37.4)</option>
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (25.6)</option>
-                    <option value="gemini-3-flash">Gemini 3 Flash Preview</option>
                   </optgroup>
-                  <optgroup label="OpenRouter & NIM Frontier">
+                  <optgroup label="OpenRouter Active Free Tier">
+                    <option value="or-glm-5-2-free">Z.ai GLM 5.2 (Free 52.6)</option>
+                    <option value="or-minimax-m3-free">MiniMax M3 (Free 45.4)</option>
+                    <option value="or-inkling-free">ThinkingMachines Inkling (Free 42.3)</option>
+                    <option value="or-nemotron-3-ultra-free">Nemotron 3 Ultra (Free 38.3)</option>
+                    <option value="or-gemma-4-31b-free">Gemma 4 31B (Free 29.7)</option>
+                  </optgroup>
+                  <optgroup label="Frontier Intelligence">
+                    <option value="or-glm-5-3-flash">Z.ai GLM 5.3 Flash (57.5)</option>
                     <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813 (45.3)</option>
                     <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B (38.3)</option>
-                    <option value="or-glm-5-2">Zhipu GLM 5.2 (52.6)</option>
-                    <option value="or-laguna-s2-1">Poolside Laguna S 2.1</option>
+                    <option value="or-laguna-s2-1-free">Poolside Laguna S 2.1 (Free)</option>
                   </optgroup>
-                  <optgroup label="Cerebras & Groq Ultra Speed">
-                    <option value="cerebras-gemma4-31b">Cerebras Gemma 4 31B (2,420 tps)</option>
-                    <option value="cerebras-gpt-120b">Cerebras GPT-OSS 120B (2,150 tps)</option>
+                  <optgroup label="Groq Ultra Speed (LPU)">
                     <option value="groq-gpt-120b">Groq GPT-OSS 120B (24.1)</option>
                     <option value="groq-qwen-27b">Groq Qwen 3.6 27B (37.7)</option>
                     <option value="groq-gpt-20b">Groq GPT-OSS 20B (15.2)</option>
@@ -362,7 +362,6 @@ export default function HomePage() {
                   <optgroup label="Legacy / Outdated">
                     <option value="gemini-3.1-pro-legacy">Gemini 3.1 Pro (Legacy)</option>
                     <option value="nim-mistral-nemotron-legacy">Mistral Nemotron (Legacy)</option>
-                    <option value="nim-nemotron-super-49b-legacy">Nemotron Super 49B (25.7)</option>
                     <option value="or-gemma-4-26b-legacy">Gemma 4 26B (26.1)</option>
                     <option value="or-dots-3-note-legacy">Dots 3 Note (Legacy)</option>
                   </optgroup>

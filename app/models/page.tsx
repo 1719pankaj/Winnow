@@ -403,7 +403,6 @@ export default function ModelsBenchmarkPage() {
             <div className="tier-segmented" style={{ padding: '3px', background: 'var(--muted)' }}>
               {[
                 { id: 'all', label: 'ALL' },
-                { id: 'cerebras', label: 'CEREBRAS (CS-3)' },
                 { id: 'groq', label: 'GROQ (LPU)' },
                 { id: 'gemini', label: 'GEMINI' },
                 { id: 'nim', label: 'NIM' },

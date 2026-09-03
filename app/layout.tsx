@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ReportIssueButton } from '@/components/ReportIssueButton';
 
 export const metadata: Metadata = {
   title: 'Winnow - Intent-Aware Personal Search Engine',
@@ -15,6 +16,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <ReportIssueButton />
       </body>
     </html>
   );

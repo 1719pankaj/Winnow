@@ -17,7 +17,24 @@ export async function GET(
     return NextResponse.json({ error: 'Search ID is required' }, { status: 400 });
   }
 
-  // Ensure search is triggered / running if job was registered
+  // Ensure search is triggered / running, restoring from database trace if needed
+  if (!jobManager.get(searchId)) {
+    try {
+      const existingTrace = await store.getTrace(searchId);
+      if (existingTrace && existingTrace.status === 'running') {
+        jobManager.register({
+          id: searchId,
+          query: existingTrace.query,
+          intent: existingTrace.intent,
+          tier: existingTrace.tier,
+          modelOverride: existingTrace.model_id,
+          status: 'running',
+        });
+      }
+    } catch (err) {
+      console.warn('[Events Route] Failed to check existing trace:', err);
+    }
+  }
   jobManager.startIfNotRunning(searchId);
 
   const headerLastId = req.headers.get('last-event-id');

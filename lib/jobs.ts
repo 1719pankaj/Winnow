@@ -1,6 +1,6 @@
 import { SearchOrchestrator } from './orchestrator';
 import { store } from './store';
-import { Trace } from './types';
+import { Trace, ProgressEvent } from './types';
 
 export interface SearchJob {
   id: string;
@@ -11,6 +11,8 @@ export interface SearchJob {
   status: 'pending' | 'running' | 'completed' | 'failed';
   promise?: Promise<Trace>;
 }
+
+import { eventHub } from './events';
 
 class SearchJobManager {
   private jobs = new Map<string, SearchJob>();
@@ -44,6 +46,7 @@ class SearchJobManager {
         .catch(async (err) => {
           job.status = 'failed';
           console.error(`[SearchJob ${id} Failed]:`, err);
+          const errorMsg = err?.message || 'Search execution failed';
           const errorTrace: Trace = {
             id,
             created_at: new Date().toISOString(),
@@ -56,11 +59,24 @@ class SearchJobManager {
             prompt_version: 'rerank.v3',
             results: [],
             candidates: [],
-            degraded_reasons: [{ reason: 'search_error', detail: err.message }],
+            degraded_reasons: [{ reason: 'search_error', detail: errorMsg }],
             llm_call_count: 0,
             cache_hit_count: 0,
+            audit: { deliberation_log: [{ timestamp: new Date().toISOString(), stage: 'error', message: errorMsg }] },
           };
-          await store.saveTrace(errorTrace);
+          try {
+            await store.saveTrace(errorTrace);
+            const errEvt: ProgressEvent = {
+              id: Date.now(),
+              type: 'error',
+              data: { message: errorMsg },
+              at: new Date().toISOString(),
+            };
+            await store.appendEvent(id, errEvt);
+            eventHub.broadcast(id, errEvt);
+          } catch (dbErr) {
+            console.error(`[SearchJob ${id} DB Save Failed]:`, dbErr);
+          }
           return errorTrace;
         });
     }
@@ -69,4 +85,10 @@ class SearchJobManager {
   }
 }
 
-export const jobManager = new SearchJobManager();
+const globalForJobs = globalThis as unknown as {
+  winnowJobManager: SearchJobManager | undefined;
+};
+
+export const jobManager = globalForJobs.winnowJobManager ?? new SearchJobManager();
+globalForJobs.winnowJobManager = jobManager;
+

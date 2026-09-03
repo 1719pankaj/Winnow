@@ -296,13 +296,42 @@ export default function RunPage() {
     if (!searchId) return;
     let isSubscribed = true;
 
+    // Reset all state for new search ID
+    lastEventIdRef.current = 0;
+    setResults([]);
+    setChaff([]);
+    setStreamedCandidates([]);
+    setPrefilterEvals([]);
+    setFetchedPages([]);
+    setRerankInference(null);
+    setAudit({ deliberation_log: [] });
+    setSearchStatus('connecting');
+    setErrorMessage(null);
+    setElapsedMs(0);
+    setStageCounts({
+      plan: { status: 'pending' },
+      retrieve: { status: 'pending' },
+      prefilter: { status: 'pending' },
+      fetch: { status: 'pending' },
+      rerank: { status: 'pending' },
+      result: { status: 'pending' },
+    });
+
     const hydrateFromTrace = (trace: any) => {
       if (!trace) return;
-      setQuery(trace.query); setNewQuery(trace.query);
-      setIntent(trace.intent); setNewIntent(trace.intent || '');
-      setTier(trace.tier); setNewTier(trace.tier);
-      setModelId(trace.model_id); setElapsedMs(trace.elapsed_ms);
+      if (trace.query) { setQuery(trace.query); setNewQuery(trace.query); }
+      if (trace.intent !== undefined) { setIntent(trace.intent); setNewIntent(trace.intent || ''); }
+      if (trace.tier) { setTier(trace.tier); setNewTier(trace.tier); }
+      if (trace.model_id) setModelId(trace.model_id);
+      if (trace.elapsed_ms) setElapsedMs(trace.elapsed_ms);
       if (trace.audit) setAudit(trace.audit);
+
+      if (trace.status === 'running') {
+        setSearchStatus((prev) => (prev === 'final' ? 'final' : 'running'));
+      } else if (trace.status === 'failed') {
+        setSearchStatus('error');
+        setErrorMessage(trace.degraded_reasons?.[0]?.detail || 'Search execution failed');
+      }
 
       if (trace.candidates && trace.candidates.length > 0) {
         setStreamedCandidates((prev) => (prev.length > 0 ? prev : trace.candidates.map((c: any) => ({
@@ -401,6 +430,7 @@ export default function RunPage() {
       }
     };
 
+    // 1. Initial hydration from trace endpoint
     fetch(`/api/trace/${searchId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((trace) => {
@@ -408,7 +438,52 @@ export default function RunPage() {
         hydrateFromTrace(trace);
       }).catch(() => {});
 
+    // 2. Open SSE stream
     const eventSource = new EventSource(`/api/search/${searchId}/events?lastEventId=${lastEventIdRef.current}`);
+
+    // Fallback polling interval in case SSE stream is blocked by mobile proxy/network
+    const pollInterval = setInterval(() => {
+      if (!isSubscribed) return;
+      fetch(`/api/trace/${searchId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((trace) => {
+          if (!isSubscribed || !trace) return;
+          hydrateFromTrace(trace);
+          if (trace.status === 'completed' || trace.status === 'failed') {
+            clearInterval(pollInterval);
+            try { eventSource.close(); } catch {}
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+
+    // Timeout guard: If still connecting after 30 seconds with no data
+    const timeoutTimer = setTimeout(() => {
+      if (!isSubscribed) return;
+      setSearchStatus((prev) => {
+        if (prev === 'connecting') {
+          setErrorMessage('Search request timed out waiting for server response. Please try again.');
+          return 'error';
+        }
+        return prev;
+      });
+    }, 30000);
+
+    eventSource.onerror = (err) => {
+      console.warn('[SSE] EventSource connection retry or error:', err);
+      // Trigger immediate trace poll on SSE glitch
+      fetch(`/api/trace/${searchId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((trace) => {
+          if (!isSubscribed || !trace) return;
+          hydrateFromTrace(trace);
+          if (trace.status === 'completed' || trace.status === 'failed') {
+            try { eventSource.close(); } catch {}
+            clearInterval(pollInterval);
+          }
+        })
+        .catch(() => {});
+    };
 
     const handleEvent = (type: string, dataStr: string, idStr?: string) => {
       if (!isSubscribed) return;
@@ -482,12 +557,14 @@ export default function RunPage() {
             .then((t) => {
               if (t) hydrateFromTrace(t);
             }).catch(() => {});
-          eventSource.close();
+          try { eventSource.close(); } catch {}
+          clearInterval(pollInterval);
           break;
         case 'error':
           setErrorMessage(data.message || 'An error occurred');
           setSearchStatus('error');
-          eventSource.close();
+          try { eventSource.close(); } catch {}
+          clearInterval(pollInterval);
           break;
       }
     };
@@ -503,7 +580,12 @@ export default function RunPage() {
       eventSource.addEventListener(type, (e: MessageEvent) => handleEvent(type, e.data, e.lastEventId));
     });
 
-    return () => { isSubscribed = false; eventSource.close(); };
+    return () => {
+      isSubscribed = false;
+      try { eventSource.close(); } catch {}
+      clearInterval(pollInterval);
+      clearTimeout(timeoutTimer);
+    };
   }, [searchId]);
 
   const isLive = searchStatus === 'running' || searchStatus === 'provisional';
@@ -643,10 +725,10 @@ export default function RunPage() {
             <div className="delib-card">
               <div className="delib-card-head">
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span className="delib-pulse-dot" style={{ background: searchStatus === 'final' ? '#22c55e' : '#38bdf8' }} />
+                  <span className="delib-pulse-dot" style={{ background: searchStatus === 'final' ? '#22c55e' : searchStatus === 'error' ? '#ef4444' : '#38bdf8' }} />
                   <span>Pipeline Deliberation Log</span>
                 </div>
-                <span>{searchStatus === 'final' ? 'Completed' : 'Streaming...'}</span>
+                <span>{searchStatus === 'final' ? 'Completed' : searchStatus === 'error' ? 'Failed' : searchStatus === 'connecting' ? 'Connecting...' : 'Streaming...'}</span>
               </div>
               <div className="delib-scroll-box">
                 {audit.deliberation_log?.map((item, idx) => (
@@ -1025,6 +1107,62 @@ export default function RunPage() {
                 <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 'var(--radius-lg)', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#854d0e', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                   <span>Provisional results — listwise LLM reranking in progress...</span>
+                </div>
+              )}
+
+              {/* Error State */}
+              {searchStatus === 'error' && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-lg)', padding: '28px 20px', textAlign: 'center', marginTop: '16px' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '10px' }}>⚠️</div>
+                  <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#991b1b', marginBottom: '6px' }}>
+                    Search Could Not Be Completed
+                  </h3>
+                  <p style={{ fontSize: '13px', color: '#7f1d1d', maxWidth: '480px', margin: '0 auto 18px auto', lineHeight: 1.5 }}>
+                    {errorMessage || 'The search process encountered an error or timed out.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchStatus('connecting');
+                      setErrorMessage(null);
+                      window.location.reload();
+                    }}
+                    className="results-submit-btn"
+                    style={{ padding: '8px 22px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <span>↻</span>
+                    <span>Retry Search</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Connecting / Loading Skeleton */}
+              {(searchStatus === 'connecting' || searchStatus === 'running') && results.length === 0 && (
+                <div style={{ padding: '48px 16px', textAlign: 'center' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '50%', background: 'var(--secondary)', border: '1px solid var(--border)', marginBottom: '16px' }}>
+                    <svg className="spin-animate" style={{ animation: 'spin 0.8s linear infinite' }} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2.5">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                    </svg>
+                  </div>
+                  <h3 style={{ fontSize: '17px', fontWeight: 600, color: 'var(--foreground)', margin: '0 0 8px 0' }}>
+                    {query ? `Searching for "${query}"...` : 'Connecting to search pipeline...'}
+                  </h3>
+                  <p style={{ fontSize: '13px', color: 'var(--muted-foreground)', maxWidth: '440px', margin: '0 auto', lineHeight: 1.5 }}>
+                    Multi-provider retrieval, neural prefiltering, content extraction, and listwise model reranking in progress.
+                  </p>
+                </div>
+              )}
+
+              {/* Empty Results State */}
+              {searchStatus === 'final' && results.length === 0 && (
+                <div style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--muted-foreground)' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '10px' }}>🔍</div>
+                  <h3 style={{ fontSize: '17px', fontWeight: 600, color: 'var(--foreground)', marginBottom: '6px' }}>
+                    No Results Found
+                  </h3>
+                  <p style={{ fontSize: '13px', maxWidth: '440px', margin: '0 auto', lineHeight: 1.5 }}>
+                    No candidates passed relevance criteria for this query. Try adjusting your search terms or selecting the Right tier.
+                  </p>
                 </div>
               )}
 

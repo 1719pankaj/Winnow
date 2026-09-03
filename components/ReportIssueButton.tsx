@@ -29,8 +29,10 @@ export function ReportIssueButton() {
     try {
       // Capture screenshot of the document body before opening the modal
       const dataUrl = await toPng(document.body, {
-        quality: 0.85,
+        quality: 0.8,
         pixelRatio: 1,
+        skipFonts: true,
+        cacheBust: false,
         filter: (node) => {
           // Exclude floating widgets and modal containers from the capture
           if (node instanceof HTMLElement) {

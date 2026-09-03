@@ -37,7 +37,12 @@ class SearchEventHub {
   }
 }
 
-export const eventHub = new SearchEventHub();
+const globalForEvents = globalThis as unknown as {
+  winnowEventHub: SearchEventHub | undefined;
+};
+
+export const eventHub = globalForEvents.winnowEventHub ?? new SearchEventHub();
+globalForEvents.winnowEventHub = eventHub;
 
 /**
  * Formats a ProgressEvent into standard Server-Sent Event text.

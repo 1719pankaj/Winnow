@@ -77,9 +77,13 @@ export async function uploadScreenshotToGitHub(
     } else {
       const errorText = await res.text();
       console.warn(`[GitHub Contents API] Non-OK status ${res.status}:`, errorText);
+      const publicBase = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://winnow.f01.dpdns.org';
+      return { url: `${publicBase}/feedback/${filename}`, localPath: localFilePath };
     }
   } catch (err) {
     console.warn('[GitHub Contents API] Failed to upload screenshot to repo:', err);
+    const publicBase = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://winnow.f01.dpdns.org';
+    return { url: `${publicBase}/feedback/${filename}`, localPath: localFilePath };
   }
 
   return { url: defaultPermanentUrl, localPath: localFilePath };

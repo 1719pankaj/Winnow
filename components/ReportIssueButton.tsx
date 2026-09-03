@@ -202,15 +202,15 @@ export function ReportIssueButton() {
       >
         {isCapturing ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <span className="spinner" style={{ width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff' }} />
-            <span>Capturing Diagnostics...</span>
+            <span className="spinner" style={{ width: '11px', height: '11px', border: '2px solid rgba(0,0,0,0.2)', borderTopColor: 'currentColor' }} />
+            <span className="report-btn-text">Capturing...</span>
           </span>
         ) : (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
-            <span>Report Issue</span>
+            <span className="report-btn-text">Report Issue</span>
           </span>
         )}
       </button>

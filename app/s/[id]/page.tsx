@@ -48,6 +48,176 @@ function Favicon({ domain, size = 16 }: { domain: string; size?: number }) {
   );
 }
 
+function XmlPromptViewer({ rawText }: { rawText: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(rawText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const renderFormattedLines = () => {
+    return rawText.split('\n').map((line, idx) => {
+      const trimmed = line.trim();
+
+      // 1. Candidate opening tag: <candidate id="..." original_rank="..." domain="...">
+      if (trimmed.startsWith('<candidate')) {
+        const parts = line.split(/(<candidate|\/?>|[a-zA-Z_]+="[^"]*")/g).filter(Boolean);
+        return (
+          <div key={idx} className="xml-line">
+            <span className="xml-line-num">{idx + 1}</span>
+            <span className="xml-line-content">
+              {parts.map((p, pi) => {
+                if (p === '<candidate' || p === '>' || p === '/>') {
+                  return <span key={pi} style={{ color: '#38bdf8', fontWeight: 600 }}>{p}</span>;
+                }
+                if (p.includes('=')) {
+                  const eqIdx = p.indexOf('=');
+                  const attr = p.slice(0, eqIdx);
+                  const val = p.slice(eqIdx + 1);
+                  return (
+                    <span key={pi}>
+                      <span style={{ color: '#fbbf24' }}>{attr}</span>
+                      <span style={{ color: '#94a3b8' }}>=</span>
+                      <span style={{ color: '#34d399' }}>{val}</span>
+                    </span>
+                  );
+                }
+                return <span key={pi}>{p}</span>;
+              })}
+            </span>
+          </div>
+        );
+      }
+
+      // 2. Candidate closing tag: </candidate>
+      if (trimmed === '</candidate>') {
+        return (
+          <div key={idx} className="xml-line">
+            <span className="xml-line-num">{idx + 1}</span>
+            <span className="xml-line-content">
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>{'</candidate>'}</span>
+            </span>
+          </div>
+        );
+      }
+
+      // 3. Known key prefixes like QUERY:, INTENT:, TITLE:, SNIPPET:, CONTENT:, CONTENT_UNAVAILABLE:
+      const fieldMatch = line.match(/^(\s*)(QUERY|INTENT|TITLE|SNIPPET|CONTENT|CONTENT_UNAVAILABLE|URL|RANK):(.*)$/);
+      if (fieldMatch) {
+        const [, indent, label, rest] = fieldMatch;
+        const labelColors: Record<string, string> = {
+          QUERY: '#f43f5e',
+          INTENT: '#ec4899',
+          TITLE: '#60a5fa',
+          SNIPPET: '#94a3b8',
+          CONTENT: '#a78bfa',
+          CONTENT_UNAVAILABLE: '#eab308',
+          URL: '#38bdf8',
+          RANK: '#fbbf24',
+        };
+        return (
+          <div key={idx} className="xml-line">
+            <span className="xml-line-num">{idx + 1}</span>
+            <span className="xml-line-content">
+              {indent}
+              <span style={{ color: labelColors[label] || '#38bdf8', fontWeight: 700, marginRight: '6px' }}>{label}:</span>
+              <span style={{ color: label === 'QUERY' ? '#ffffff' : label === 'INTENT' ? '#f1f5f9' : '#e4e4e7' }}>{rest}</span>
+            </span>
+          </div>
+        );
+      }
+
+      // 4. Instructions / Header commentary
+      if (trimmed.startsWith('CANDIDATES') || trimmed.startsWith('SYSTEM:')) {
+        return (
+          <div key={idx} className="xml-line">
+            <span className="xml-line-num">{idx + 1}</span>
+            <span className="xml-line-content">
+              <span style={{ color: '#a1a1aa', fontStyle: 'italic', fontWeight: 500 }}>{line}</span>
+            </span>
+          </div>
+        );
+      }
+
+      // 5. Generic lines
+      return (
+        <div key={idx} className="xml-line">
+          <span className="xml-line-num">{idx + 1}</span>
+          <span className="xml-line-content" style={{ color: '#cbd5e1' }}>{line || ' '}</span>
+        </div>
+      );
+    });
+  };
+
+  const lineCount = rawText.split('\n').length;
+
+  return (
+    <div className="xml-viewer-container">
+      <div className="xml-viewer-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="xml-badge-tag">&lt;/&gt; XML PROMPT</span>
+          <span style={{ fontSize: '11px', color: '#a1a1aa', fontFamily: 'var(--font-mono, monospace)' }}>
+            Candidate XML Context Fed to Model
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '10px', color: '#71717a', fontFamily: 'monospace' }}>
+            {lineCount} lines · {(rawText.length / 1024).toFixed(1)} KB
+          </span>
+          <button type="button" onClick={handleCopy} className="xml-copy-btn">
+            {copied ? '✓ Copied' : 'Copy XML'}
+          </button>
+        </div>
+      </div>
+      <div className="xml-viewer-body">
+        {renderFormattedLines()}
+      </div>
+    </div>
+  );
+}
+
+function RawResponseViewer({ rawText, modelId }: { rawText: string; modelId?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(rawText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const lineCount = rawText.split('\n').length;
+
+  return (
+    <div className="xml-viewer-container">
+      <div className="xml-viewer-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="xml-badge-tag" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#22c55e', borderColor: 'rgba(34, 197, 94, 0.3)' }}>
+            RAW RESPONSE
+          </span>
+          <span style={{ fontSize: '11px', color: '#a1a1aa', fontFamily: 'var(--font-mono, monospace)' }}>
+            {modelId ? `Inference from ${modelId}` : 'Raw LLM Model Output'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '10px', color: '#71717a', fontFamily: 'monospace' }}>
+            {lineCount} lines · {(rawText.length / 1024).toFixed(1)} KB
+          </span>
+          <button type="button" onClick={handleCopy} className="xml-copy-btn">
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
+      </div>
+      <div className="xml-viewer-body" style={{ maxHeight: '420px' }}>
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', color: '#e4e4e7' }}>
+          {rawText}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 export default function RunPage() {
   const params = useParams();
   const router = useRouter();
@@ -344,7 +514,27 @@ export default function RunPage() {
       <header className="results-header-sticky">
         <div className="results-header-container">
           <div className="results-header-top-row">
-            <a href="/" className="header-brand-link"><span>Winnow</span></a>
+            <div className="results-header-brand-bar">
+              <a href="/" className="header-brand-link"><span>Winnow</span></a>
+
+              <div className="results-header-mobile-actions mobile-only">
+                <div className="tier-segmented" style={{ padding: '2px' }}>
+                  <button type="button" className={`tier-tab-btn ${newTier === 'fast' ? 'active' : ''}`} onClick={() => setNewTier('fast')} style={{ padding: '3px 7px', fontSize: '11px' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    <span>Fast</span>
+                  </button>
+                  <button type="button" className={`tier-tab-btn ${newTier === 'right' ? 'active' : ''}`} onClick={() => setNewTier('right')} style={{ padding: '3px 7px', fontSize: '11px' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+                    <span>Right</span>
+                  </button>
+                </div>
+
+                <a href="/models" className="header-models-link" title="View all models" style={{ padding: '4px 8px' }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                  <span>Models</span>
+                </a>
+              </div>
+            </div>
 
             <form onSubmit={handleNewSearch} className="results-search-bar">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted-foreground)', flexShrink: 0 }}>
@@ -356,7 +546,7 @@ export default function RunPage() {
                 {newIntent ? 'Intent: Active' : '+ Intent'}
               </button>
 
-              <div className="tier-segmented" style={{ padding: '2px' }}>
+              <div className="tier-segmented desktop-only" style={{ padding: '2px' }}>
                 <button type="button" className={`tier-tab-btn ${newTier === 'fast' ? 'active' : ''}`} onClick={() => setNewTier('fast')} style={{ padding: '3px 8px', fontSize: '11px' }}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                   <span>Fast</span>
@@ -369,7 +559,7 @@ export default function RunPage() {
               <button type="submit" className="results-submit-btn">Search</button>
             </form>
 
-            <a href="/models" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '5px 10px', fontSize: '11px', fontWeight: 500, color: 'var(--muted-foreground)', flexShrink: 0, transition: 'color 0.15s' }} title="View all models">
+            <a href="/models" className="header-models-link desktop-only" title="View all models">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
               <span>Models</span>
             </a>
@@ -507,7 +697,7 @@ export default function RunPage() {
               )}
 
               {/* Full candidate table */}
-              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
@@ -580,11 +770,11 @@ export default function RunPage() {
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>✓ Passed ({prefilterEvals.filter((e) => e.action === 'Keep').length})</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {prefilterEvals.filter((e) => e.action === 'Keep').map((ev) => (
-                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', background: '#fafffe', border: '1px solid #dcfce7', borderRadius: 'var(--radius-md)', fontSize: '12px' }}>
+                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#fafffe', border: '1px solid #dcfce7', borderRadius: 'var(--radius-md)', fontSize: '12px', minWidth: 0 }}>
                         <Favicon domain={ev.domain} />
-                        <span style={{ fontWeight: 600, minWidth: '120px' }}>{ev.domain}</span>
-                        <span style={{ flex: 1, color: '#3f3f46', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
-                        <span className="mono" style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>cos: {ev.prefilter_score.toFixed(3)}</span>
+                        <span style={{ fontWeight: 600, maxWidth: '120px', minWidth: '70px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.domain}</span>
+                        <span style={{ flex: 1, minWidth: 0, color: '#3f3f46', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
+                        <span className="mono" style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600, flexShrink: 0 }}>cos: {ev.prefilter_score.toFixed(3)}</span>
                       </div>
                     ))}
                   </div>
@@ -597,11 +787,11 @@ export default function RunPage() {
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#991b1b', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>✗ Blocked ({prefilterEvals.filter((e) => e.action !== 'Keep').length})</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {prefilterEvals.filter((e) => e.action !== 'Keep').map((ev) => (
-                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', background: '#fffbfb', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', fontSize: '12px' }}>
+                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#fffbfb', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', fontSize: '12px', minWidth: 0 }}>
                         <Favicon domain={ev.domain} />
-                        <span style={{ fontWeight: 600, minWidth: '120px', opacity: 0.7 }}>{ev.domain}</span>
-                        <span style={{ flex: 1, color: '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'line-through' }}>{ev.title}</span>
-                        <span style={{ padding: '1px 6px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#991b1b' }}>{ev.drop_reason || 'filtered'}</span>
+                        <span style={{ fontWeight: 600, maxWidth: '120px', minWidth: '70px', opacity: 0.7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.domain}</span>
+                        <span style={{ flex: 1, minWidth: 0, color: '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'line-through' }}>{ev.title}</span>
+                        <span style={{ padding: '1px 6px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#991b1b', flexShrink: 0 }}>{ev.drop_reason || 'filtered'}</span>
                       </div>
                     ))}
                   </div>
@@ -775,17 +965,24 @@ export default function RunPage() {
 
               {/* LLM Prompt */}
               {(rerankInference?.user_prompt || audit.rerank?.user_prompt) && (
-                <div style={{ marginBottom: '16px' }}>
-                  <strong style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted-foreground)' }}>Candidate XML Context Fed to Model:</strong>
-                  <pre className="code-pre-box" style={{ maxHeight: '400px' }}>{rerankInference?.user_prompt || audit.rerank?.user_prompt}</pre>
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--foreground)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>
+                    Candidate XML Context Fed to Model:
+                  </div>
+                  <XmlPromptViewer rawText={rerankInference?.user_prompt || audit.rerank?.user_prompt || ''} />
                 </div>
               )}
 
               {/* Raw LLM Response */}
               {(rerankInference?.raw_response || audit.rerank?.raw_response) && (
                 <div>
-                  <strong style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted-foreground)' }}>Raw LLM Model Output:</strong>
-                  <pre className="code-pre-box" style={{ maxHeight: '400px' }}>{rerankInference?.raw_response || audit.rerank?.raw_response}</pre>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--foreground)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>
+                    Raw LLM Model Output:
+                  </div>
+                  <RawResponseViewer
+                    rawText={rerankInference?.raw_response || audit.rerank?.raw_response || ''}
+                    modelId={rerankInference?.model_id || modelId}
+                  />
                 </div>
               )}
 

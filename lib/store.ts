@@ -34,107 +34,114 @@ class WinnowStore {
     });
   }
 
+  private initPromise: Promise<void> | null = null;
+
   async init(): Promise<void> {
     if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
 
-    // Initialize base tables
-    await this.client.executeMultiple(`
-      CREATE TABLE IF NOT EXISTS traces (
-        id TEXT PRIMARY KEY,
-        created_at TEXT,
-        query TEXT,
-        intent TEXT,
-        tier TEXT,
-        model_id TEXT,
-        status TEXT,
-        elapsed_ms INTEGER,
-        prompt_version TEXT,
-        results_json TEXT,
-        candidates_json TEXT,
-        degraded_json TEXT,
-        llm_call_count INTEGER,
-        cache_hit_count INTEGER,
-        audit_json TEXT
+    this.initPromise = (async () => {
+      // Initialize base tables
+      await this.client.executeMultiple(`
+        CREATE TABLE IF NOT EXISTS traces (
+          id TEXT PRIMARY KEY,
+          created_at TEXT,
+          query TEXT,
+          intent TEXT,
+          tier TEXT,
+          model_id TEXT,
+          status TEXT,
+          elapsed_ms INTEGER,
+          prompt_version TEXT,
+          results_json TEXT,
+          candidates_json TEXT,
+          degraded_json TEXT,
+          llm_call_count INTEGER,
+          cache_hit_count INTEGER,
+          audit_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS events (
+          search_id TEXT,
+          seq INTEGER,
+          type TEXT,
+          data_json TEXT,
+          at TEXT,
+          PRIMARY KEY (search_id, seq)
+        );
+
+        CREATE TABLE IF NOT EXISTS page_cache (
+          url_canonical TEXT PRIMARY KEY,
+          fetched_at TEXT,
+          status TEXT,
+          extraction_method TEXT,
+          char_count INTEGER,
+          text TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS embed_cache (
+          hash TEXT PRIMARY KEY,
+          model_id TEXT,
+          dims INTEGER,
+          vector BLOB,
+          created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS model_cards (
+          id TEXT PRIMARY KEY,
+          provider TEXT,
+          model_string TEXT,
+          intelligence_index REAL,
+          coding_index REAL,
+          agentic_index REAL,
+          openrouter_id TEXT,
+          context_length INTEGER,
+          match_status TEXT,
+          tested_latency_ms REAL,
+          tested_status TEXT,
+          tested_error TEXT,
+          capabilities_json TEXT,
+          updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS usage (
+          provider TEXT,
+          utc_date TEXT,
+          count INTEGER,
+          PRIMARY KEY (provider, utc_date)
+        );
+      `);
+
+      // Parallel column migrations
+      const alterStatements = [
+        `ALTER TABLE traces ADD COLUMN audit_json TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN model_string TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN intelligence_index REAL`,
+        `ALTER TABLE model_cards ADD COLUMN coding_index REAL`,
+        `ALTER TABLE model_cards ADD COLUMN agentic_index REAL`,
+        `ALTER TABLE model_cards ADD COLUMN openrouter_id TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN context_length INTEGER`,
+        `ALTER TABLE model_cards ADD COLUMN match_status TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN tested_latency_ms REAL`,
+        `ALTER TABLE model_cards ADD COLUMN tested_status TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN tested_error TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN capabilities_json TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN status_override TEXT`,
+        `ALTER TABLE model_cards ADD COLUMN updated_at TEXT`,
+      ];
+
+      await Promise.all(
+        alterStatements.map((stmt) =>
+          this.client.execute(stmt).catch(() => {
+            // Column already exists or already migrated
+          })
+        )
       );
 
-      CREATE TABLE IF NOT EXISTS events (
-        search_id TEXT,
-        seq INTEGER,
-        type TEXT,
-        data_json TEXT,
-        at TEXT,
-        PRIMARY KEY (search_id, seq)
-      );
+      this.initialized = true;
+    })();
 
-      CREATE TABLE IF NOT EXISTS page_cache (
-        url_canonical TEXT PRIMARY KEY,
-        fetched_at TEXT,
-        status TEXT,
-        extraction_method TEXT,
-        char_count INTEGER,
-        text TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS embed_cache (
-        hash TEXT PRIMARY KEY,
-        model_id TEXT,
-        dims INTEGER,
-        vector BLOB,
-        created_at TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS model_cards (
-        id TEXT PRIMARY KEY,
-        provider TEXT,
-        model_string TEXT,
-        intelligence_index REAL,
-        coding_index REAL,
-        agentic_index REAL,
-        openrouter_id TEXT,
-        context_length INTEGER,
-        match_status TEXT,
-        tested_latency_ms REAL,
-        tested_status TEXT,
-        tested_error TEXT,
-        capabilities_json TEXT,
-        updated_at TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS usage (
-        provider TEXT,
-        utc_date TEXT,
-        count INTEGER,
-        PRIMARY KEY (provider, utc_date)
-      );
-    `);
-
-    // Individual non-blocking column migrations for backward compatibility
-    const alterStatements = [
-      `ALTER TABLE traces ADD COLUMN audit_json TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN model_string TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN intelligence_index REAL`,
-      `ALTER TABLE model_cards ADD COLUMN coding_index REAL`,
-      `ALTER TABLE model_cards ADD COLUMN agentic_index REAL`,
-      `ALTER TABLE model_cards ADD COLUMN openrouter_id TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN context_length INTEGER`,
-      `ALTER TABLE model_cards ADD COLUMN match_status TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN tested_latency_ms REAL`,
-      `ALTER TABLE model_cards ADD COLUMN tested_status TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN tested_error TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN capabilities_json TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN status_override TEXT`,
-      `ALTER TABLE model_cards ADD COLUMN updated_at TEXT`,
-    ];
-
-    for (const stmt of alterStatements) {
-      try {
-        await this.client.execute(stmt);
-      } catch {
-        // Column already exists or already migrated
-      }
-    }
-
-    this.initialized = true;
+    return this.initPromise;
   }
 
   // --- Trace Operations ---
@@ -432,4 +439,9 @@ class WinnowStore {
   }
 }
 
-export const store = new WinnowStore();
+const globalForStore = globalThis as unknown as {
+  winnowStore: WinnowStore | undefined;
+};
+
+export const store = globalForStore.winnowStore ?? new WinnowStore();
+globalForStore.winnowStore = store;

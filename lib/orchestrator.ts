@@ -4,7 +4,7 @@ import { HttpSearchAdapter } from './adapters/search';
 import { InferenceAdapter } from './adapters/inference';
 import { stagePlan, PlanOutput } from './stages/plan';
 import { stageRetrieve } from './stages/retrieve';
-import { stagePrefilter } from './stages/prefilter';
+import { stagePrefilter, PrefilterOutput } from './stages/prefilter';
 import { stageFetch } from './stages/fetch';
 import { stageRerank, RerankOutput } from './stages/rerank';
 import { stageAssemble } from './stages/assemble';
@@ -22,7 +22,7 @@ import {
 export interface SearchRunOptions {
   query: string;
   intent?: string | null;
-  tier?: 'fast' | 'right';
+  tier?: 'rush' | 'fast' | 'right';
   modelOverride?: string;
 }
 
@@ -90,19 +90,48 @@ export class SearchOrchestrator {
     const query = options.query.trim();
     const intent = options.intent && options.intent.trim() ? options.intent.trim() : null;
     const tierName = options.tier || 'fast';
-    const tierConfig = config.winnow.tiers[tierName];
+    const tierConfig = config.winnow.tiers[tierName] || {
+      providers: ['serper'],
+      retrieve_count: 10,
+      prefilter_keep: 10,
+      fetch_enabled: false,
+      fetch_max: 0,
+      fetch_chars_per_page: 0,
+      rerank_mode: 'none',
+      allow_tool_loop: false,
+      tool_loop_max_rounds: 0,
+      deadline_ms: 3000,
+    };
 
     const t0 = Date.now();
+    const degradedReasons: { reason: string; detail?: string }[] = [];
 
-    // 1. Resolve Dynamic Fallback Chain strictly enforcing user governance rules:
-    // - NO disabled models
-    // - NO outdated/legacy models
-    // - NO incompatible models
-    // - NO endpoints failing or taking > 3.0 seconds to return OK
-    const dynamicResolution = await resolveDynamicFallbackChain(options.modelOverride, config);
-    let modelId = dynamicResolution.primaryModelId;
-    let { adapter: inferenceAdapter, provider } = this.resolveInferenceAdapter(modelId, config);
-    const fallbackCandidateList = dynamicResolution.chain;
+    const isRush = tierName === 'rush';
+    let modelId = isRush ? 'none (direct search)' : '';
+    let provider = isRush ? 'direct' : '';
+    let inferenceAdapter: any = null;
+    let fallbackCandidateList: string[] = [];
+
+    if (!isRush) {
+      // 1. Resolve Dynamic Fallback Chain strictly enforcing user governance rules:
+      // - NO disabled models
+      // - NO outdated/legacy models
+      // - NO incompatible models
+      // - NO endpoints failing or taking > 3.0 seconds to return OK
+      const dynamicResolution = await resolveDynamicFallbackChain(options.modelOverride, config);
+      modelId = dynamicResolution.primaryModelId;
+      const resolved = this.resolveInferenceAdapter(modelId, config);
+      inferenceAdapter = resolved.adapter;
+      provider = resolved.provider;
+      fallbackCandidateList = dynamicResolution.chain;
+
+      if (dynamicResolution.disqualifiedRequestedModel) {
+        degradedReasons.push({
+          reason: 'model_policy_override',
+          detail: `Disqualified model "${dynamicResolution.disqualifiedRequestedModel}" (${dynamicResolution.disqualificationReason}). Dynamically switched to "${modelId}".`,
+        });
+      }
+    }
 
     // Resolve Search Adapters
     const searchAdapters = config.providers
@@ -111,15 +140,6 @@ export class SearchOrchestrator {
 
     if (searchAdapters.length === 0) {
       throw new Error(`No enabled search providers for tier "${tierName}"`);
-    }
-
-    const degradedReasons: { reason: string; detail?: string }[] = [];
-
-    if (dynamicResolution.disqualifiedRequestedModel) {
-      degradedReasons.push({
-        reason: 'model_policy_override',
-        detail: `Disqualified model "${dynamicResolution.disqualifiedRequestedModel}" (${dynamicResolution.disqualificationReason}). Dynamically switched to "${modelId}".`,
-      });
     }
 
     // Initialize Trace in Database
@@ -162,7 +182,7 @@ export class SearchOrchestrator {
       interpretation: 'Searching verbatim.',
     };
 
-    if (intent) {
+    if (intent && !isRush) {
       await this.emit('stage_started', { stage: 'plan', index: 0, label: 'Planning' });
       await this.logDeliberation('plan', `Analyzing intent: "${intent}" via planner model (${modelId})...`);
 
@@ -289,59 +309,84 @@ export class SearchOrchestrator {
     // ----------------------------------------------------
     // STAGE 2: PREFILTER
     // ----------------------------------------------------
-    await this.emit('stage_started', { stage: 'prefilter', index: 2, label: 'Prefiltering' });
-    await this.emit('prefilter_started', { candidate_count: activeCount });
-    await this.logDeliberation('prefilter', `Computing semantic cosine similarity & hard blocklists on ${activeCount} candidates...`);
+    let prefilterOut: PrefilterOutput;
+    if (isRush) {
+      await this.emit('stage_skipped', { stage: 'prefilter', reason: 'rush_mode_direct' });
+      await this.logDeliberation('prefilter', 'Rush tier: bypassing semantic embedding prefilter for instant results.');
+      prefilterOut = {
+        candidates,
+        keptCount: activeCount,
+        droppedCount: 0,
+        droppedByBlocklist: 0,
+      };
+      this.audit.prefilter = {
+        kept_count: activeCount,
+        dropped_count: 0,
+        drops_by_blocklist: 0,
+        evaluations: candidates.map((c) => ({
+          id: c.id,
+          domain: c.domain,
+          title: c.title,
+          prefilter_score: 1.0,
+          fused_score: c.fused_score || 0,
+          action: 'Keep',
+        })),
+      };
+    } else {
+      await this.emit('stage_started', { stage: 'prefilter', index: 2, label: 'Prefiltering' });
+      await this.emit('prefilter_started', { candidate_count: activeCount });
+      await this.logDeliberation('prefilter', `Computing semantic cosine similarity & hard blocklists on ${activeCount} candidates...`);
 
-    const prefilterOut = await stagePrefilter({
-      query,
-      intent,
-      candidates,
-      config,
-      tierName,
-      advisoryAvoidDomains: planResult.must_avoid_domains,
-    });
-    candidates = prefilterOut.candidates;
+      prefilterOut = await stagePrefilter({
+        query,
+        intent,
+        candidates,
+        config,
+        tierName,
+        advisoryAvoidDomains: planResult.must_avoid_domains,
+      });
+      candidates = prefilterOut.candidates;
 
-    this.audit.prefilter = {
-      kept_count: prefilterOut.keptCount,
-      dropped_count: prefilterOut.droppedCount,
-      drops_by_blocklist: prefilterOut.droppedByBlocklist,
-      evaluations: candidates.map((c) => ({
-        id: c.id,
-        domain: c.domain,
-        title: c.title,
-        prefilter_score: c.prefilter_score || 0,
-        fused_score: c.fused_score || 0,
-        action: c.dropped_at_stage ? `Drop (${c.drop_reason})` : 'Keep',
-      })),
-    };
+      this.audit.prefilter = {
+        kept_count: prefilterOut.keptCount,
+        dropped_count: prefilterOut.droppedCount,
+        drops_by_blocklist: prefilterOut.droppedByBlocklist,
+        evaluations: candidates.map((c) => ({
+          id: c.id,
+          domain: c.domain,
+          title: c.title,
+          prefilter_score: c.prefilter_score || 0,
+          fused_score: c.fused_score || 0,
+          action: c.dropped_at_stage ? `Drop (${c.drop_reason})` : 'Keep',
+        })),
+      };
 
-    await this.logDeliberation('prefilter', `Prefilter finished: kept ${prefilterOut.keptCount}, dropped ${prefilterOut.droppedCount} (Hard-blocked: ${prefilterOut.droppedByBlocklist}).`);
-    await this.emit('prefilter_done', {
-      kept: prefilterOut.keptCount,
-      dropped: prefilterOut.droppedCount,
-      blocklist_drops: prefilterOut.droppedByBlocklist,
-    });
+      await this.logDeliberation('prefilter', `Prefilter finished: kept ${prefilterOut.keptCount}, dropped ${prefilterOut.droppedCount} (Hard-blocked: ${prefilterOut.droppedByBlocklist}).`);
+      await this.emit('prefilter_done', {
+        kept: prefilterOut.keptCount,
+        dropped: prefilterOut.droppedCount,
+        blocklist_drops: prefilterOut.droppedByBlocklist,
+      });
 
-    // Stream full prefilter evaluations for live rendering
-    await this.emit('prefilter_evaluations', {
-      kept_count: prefilterOut.keptCount,
-      dropped_count: prefilterOut.droppedCount,
-      drops_by_blocklist: prefilterOut.droppedByBlocklist,
-      evaluations: candidates.map((c) => ({
-        id: c.id,
-        url: c.url,
-        domain: c.domain,
-        title: c.title,
-        snippet: c.snippet,
-        prefilter_score: c.prefilter_score || 0,
-        fused_score: c.fused_score || 0,
-        action: c.dropped_at_stage ? `Drop` : 'Keep',
-        drop_reason: c.drop_reason || null,
-        dropped_at_stage: c.dropped_at_stage || null,
-      })),
-    });
+      // Stream full prefilter evaluations for live rendering
+      await this.emit('prefilter_evaluations', {
+        kept_count: prefilterOut.keptCount,
+        dropped_count: prefilterOut.droppedCount,
+        drops_by_blocklist: prefilterOut.droppedByBlocklist,
+        evaluations: candidates.map((c) => ({
+          id: c.id,
+          url: c.url,
+          domain: c.domain,
+          title: c.title,
+          snippet: c.snippet,
+          prefilter_score: c.prefilter_score || 0,
+          fused_score: c.fused_score || 0,
+          action: c.dropped_at_stage ? `Drop` : 'Keep',
+          drop_reason: c.drop_reason || null,
+          dropped_at_stage: c.dropped_at_stage || null,
+        })),
+      });
+    }
 
     // Provisional results
     const interimRanked = stageAssemble(candidates);
@@ -408,105 +453,139 @@ export class SearchOrchestrator {
           })),
       });
     } else {
-      await this.emit('stage_skipped', { stage: 'fetch', reason: 'fast_tier_snippets_only' });
-      await this.logDeliberation('fetch', 'Fast tier: full-page fetching skipped (evaluating snippets).');
+      await this.emit('stage_skipped', { stage: 'fetch', reason: isRush ? 'rush_tier_direct' : 'fast_tier_snippets_only' });
+      await this.logDeliberation('fetch', isRush ? 'Rush tier: full-page fetching skipped.' : 'Fast tier: full-page fetching skipped (evaluating snippets).');
     }
 
     // ----------------------------------------------------
     // STAGE 4: RERANK (Multi-Model Failover Resilient)
     // ----------------------------------------------------
-    await this.emit('stage_started', { stage: 'rerank', index: 4, label: 'Reranking' });
-    const activeRerankCandidates = candidates.filter((c) => !c.dropped_at_stage);
+    if (isRush) {
+      await this.emit('stage_skipped', { stage: 'rerank', reason: 'rush_mode_direct' });
+      await this.logDeliberation('rerank', 'Rush tier: bypassing LLM reranker for sub-second Google-speed delivery.');
 
-    await this.emit('rerank_started', {
-      mode: tierConfig.rerank_mode,
-      model_id: modelId,
-      candidate_count: activeRerankCandidates.length,
-    });
-    await this.logDeliberation('rerank', `Executing listwise LLM evaluation with ${modelId} across ${activeRerankCandidates.length} candidates...`);
+      candidates = candidates.map((c, idx) => ({
+        ...c,
+        final_score: Math.max(50, Math.min(99, 98 - idx * 4)),
+        verdict: 'keep',
+        rationale: `Direct search result via ${c.sources.map((s) => s.provider).join(', ')} (Rush mode).`,
+      }));
 
-    let rerankOut: RerankOutput = {
-      candidates,
-      keptCount: activeRerankCandidates.length,
-      droppedCount: 0,
-    };
-
-    let rerankSuccess = false;
-    for (const candModelId of fallbackCandidateList) {
-      try {
-        const { adapter: candAdapter, modelId: activeCandId, provider: activeProv } = this.resolveInferenceAdapter(candModelId, config);
-        
-        rerankOut = await stageRerank({
-          query,
-          intent,
-          candidates,
-          config,
-          inferenceAdapter: candAdapter,
-          searchId: this.searchId,
-          freshness: planResult.freshness,
-          tierName,
-        });
-
-        if (!rerankOut.is_degraded) {
-          rerankSuccess = true;
-          modelId = activeCandId;
-          break;
-        } else {
-          await this.logDeliberation('rerank', `Model ${candModelId} (${activeProv}) degraded, trying next provider in fallback chain...`);
-        }
-      } catch (err: any) {
-        await this.logDeliberation('rerank', `Model ${candModelId} failover error (${err.message}). Retrying next provider...`);
-      }
-    }
-
-    candidates = rerankOut.candidates;
-
-    this.audit.rerank = {
-      system_prompt: rerankOut.system_prompt,
-      user_prompt: rerankOut.user_prompt,
-      raw_response: rerankOut.raw_response,
-      parse_ladder_rung: rerankOut.parse_ladder_rung,
-      evaluations: candidates.map((c) => ({
-        id: c.id,
-        domain: c.domain,
-        score: c.final_score || 0,
-        verdict: c.verdict || 'keep',
-        rationale: c.rationale || '',
-      })),
-    };
-
-    if (rerankOut.is_degraded && !rerankSuccess) {
-      degradedReasons.push({ reason: 'rerank_degraded', detail: 'Parsed via fallback ordering across providers' });
-      await this.emit('degraded', { reason: 'rerank_degraded' });
-    }
-
-    await this.logDeliberation('rerank', `Reranking complete (${rerankOut.parse_ladder_rung || 'parsed'} via ${modelId}): ${rerankOut.keptCount} kept, ${rerankOut.droppedCount} dropped.`);
-    await this.emit('rerank_done', { kept: rerankOut.keptCount, dropped: rerankOut.droppedCount });
-
-    // Stream full LLM inference data for live rendering
-    await this.emit('rerank_inference', {
-      model_id: modelId,
-      parse_ladder_rung: rerankOut.parse_ladder_rung,
-      system_prompt: rerankOut.system_prompt,
-      user_prompt: rerankOut.user_prompt,
-      raw_response: rerankOut.raw_response,
-      evaluations: candidates
-        .filter((c) => !c.dropped_at_stage || c.verdict)
-        .map((c) => ({
+      this.audit.rerank = {
+        evaluations: candidates.map((c) => ({
           id: c.id,
           domain: c.domain,
-          title: c.title,
-          url: c.url,
-          final_score: c.final_score || 0,
+          score: c.final_score || 0,
+          verdict: 'keep',
+          rationale: c.rationale || '',
+        })),
+      };
+    } else {
+      await this.emit('stage_started', { stage: 'rerank', index: 4, label: 'Reranking' });
+      const activeRerankCandidates = candidates.filter((c) => !c.dropped_at_stage);
+
+      await this.emit('rerank_started', {
+        mode: tierConfig.rerank_mode,
+        model_id: modelId,
+        candidate_count: activeRerankCandidates.length,
+      });
+      await this.logDeliberation('rerank', `Executing listwise LLM evaluation with ${modelId} across ${activeRerankCandidates.length} candidates...`);
+
+      let rerankOut: RerankOutput = {
+        candidates,
+        keptCount: activeRerankCandidates.length,
+        droppedCount: 0,
+      };
+
+      let rerankSuccess = false;
+      for (const candModelId of fallbackCandidateList) {
+        try {
+          const { adapter: candAdapter, modelId: activeCandId, provider: activeProv } = this.resolveInferenceAdapter(candModelId, config);
+          
+          rerankOut = await stageRerank({
+            query,
+            intent,
+            candidates,
+            config,
+            inferenceAdapter: candAdapter,
+            searchId: this.searchId,
+            freshness: planResult.freshness,
+            tierName,
+          });
+
+          if (!rerankOut.is_degraded) {
+            rerankSuccess = true;
+            modelId = activeCandId;
+            break;
+          } else {
+            await this.logDeliberation('rerank', `Model ${candModelId} (${activeProv}) degraded, trying next provider in fallback chain...`);
+          }
+        } catch (err: any) {
+          await this.logDeliberation('rerank', `Model ${candModelId} failover error (${err.message}). Retrying next provider...`);
+        }
+      }
+
+      candidates = rerankOut.candidates;
+
+      this.audit.rerank = {
+        system_prompt: rerankOut.system_prompt,
+        user_prompt: rerankOut.user_prompt,
+        raw_response: rerankOut.raw_response,
+        parse_ladder_rung: rerankOut.parse_ladder_rung,
+        evaluations: candidates.map((c) => ({
+          id: c.id,
+          domain: c.domain,
+          score: c.final_score || 0,
           verdict: c.verdict || 'keep',
           rationale: c.rationale || '',
         })),
-    });
+      };
+
+      if (rerankOut.is_degraded && !rerankSuccess) {
+        degradedReasons.push({ reason: 'rerank_degraded', detail: 'Parsed via fallback ordering across providers' });
+        await this.emit('degraded', { reason: 'rerank_degraded' });
+      }
+
+      await this.logDeliberation('rerank', `Reranking complete (${rerankOut.parse_ladder_rung || 'parsed'} via ${modelId}): ${rerankOut.keptCount} kept, ${rerankOut.droppedCount} dropped.`);
+      await this.emit('rerank_done', { kept: rerankOut.keptCount, dropped: rerankOut.droppedCount });
+
+      // Stream full LLM inference data for live rendering
+      await this.emit('rerank_inference', {
+        model_id: modelId,
+        parse_ladder_rung: rerankOut.parse_ladder_rung,
+        system_prompt: rerankOut.system_prompt,
+        user_prompt: rerankOut.user_prompt,
+        raw_response: rerankOut.raw_response,
+        evaluations: candidates
+          .filter((c) => !c.dropped_at_stage || c.verdict)
+          .map((c) => ({
+            id: c.id,
+            domain: c.domain,
+            title: c.title,
+            url: c.url,
+            final_score: c.final_score || 0,
+            verdict: c.verdict || 'keep',
+            rationale: c.rationale || '',
+          })),
+      });
+    }
 
     // ----------------------------------------------------
     // STAGE 5: ASSEMBLE (Final Ranked Results & Provenance)
     // ----------------------------------------------------
-    const finalResults: RankedResult[] = stageAssemble(candidates);
+    let finalResults: RankedResult[] = stageAssemble(candidates);
+    if (isRush) {
+      finalResults = finalResults.map((r, idx) => {
+        const providerNames = Array.isArray(r.provenance?.providers)
+          ? r.provenance.providers.map((p: any) => p.provider || p).filter(Boolean)
+          : ['search'];
+        return {
+          ...r,
+          score: Math.max(50, Math.min(99, 98 - idx * 4)),
+          rationale: `Direct search result via ${providerNames.join(', ')} (Rush mode).`,
+        };
+      });
+    }
     const totalElapsed = Date.now() - t0;
 
     await this.logDeliberation('assemble', `Assembled ${finalResults.length} final ranked results with rank deltas and provenance.`);

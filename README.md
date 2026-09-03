@@ -157,8 +157,9 @@ flowchart TD
         RRF --> S2[Stage 2: Semantic Prefilter]
         
         S2 -->|Cosine Embeddings + Domain Penalties| Guard{Tier Check}
-        Guard -->|Fast Tier| S4[Stage 4: Listwise Rerank]
-        Guard -->|Right / Deep Research| S3[Stage 3: Fetch & Read]
+        Guard -->|Rush Mode ⚡| S5[Stage 5: Result Assembly]
+        Guard -->|Fast Tier 🚀| S4[Stage 4: Listwise Rerank]
+        Guard -->|Right / Deep Research 🧠| S3[Stage 3: Fetch & Read]
         
         subgraph ContentFetch [Headless Content Scraper]
             S3 --> Readability[Mozilla Readability DOM Parser]
@@ -239,6 +240,22 @@ Winnow does not hardcode static models. It features a live benchmark engine at `
 - **Provider Governance:** Filter, test, and re-classify models on the fly across Groq, Google Gemini, NVIDIA NIM, and OpenRouter.
 
 ---
+
+## ⚡ Rush Mode: Google Speed, 0s AI Overhead
+
+Not every search requires deep cognitive deliberation. Sometimes you just need answers right now.
+
+Winnow provides **Rush Mode** for sub-second, direct multi-engine retrieval:
+- **0ms Instant Navigation:** Clicking Search navigates immediately using client-generated IDs with no network blocking.
+- **Bypasses LLM Inference:** Skips Stage 0 planning, Stage 2 semantic embedding, Stage 3 scraping, and Stage 4 LLM reranking.
+- **RRF Reciprocal Rank Fusion:** Multi-engine search APIs are queried in parallel (~200ms) and fused directly into clean, ranked result cards.
+- **Instant Toggle:** Slide the intelligence volume dial to **0%** or click `⚡ Rush` in the discrete tier switcher.
+
+<div align="center">
+<br />
+<img src="docs/assets/rush-mode.png" alt="Winnow Rush Mode Results" width="100%" style="border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);" />
+<br />
+</div>
 
 ## Built-In 10/10 Issue & Diagnostic Engine
 

@@ -9,7 +9,7 @@ export interface RerankOptions {
   intent: string | null;
   candidates: Candidate[];
   config: FullWinnowConfig;
-  tierName: 'fast' | 'right';
+  tierName: 'rush' | 'fast' | 'right';
   inferenceAdapter: InferenceAdapter;
   searchId: string;
   freshness?: 'none' | 'week' | 'month' | 'year';

@@ -7,7 +7,7 @@ export interface PrefilterOptions {
   intent: string | null;
   candidates: Candidate[];
   config: FullWinnowConfig;
-  tierName: 'fast' | 'right';
+  tierName: 'rush' | 'fast' | 'right';
   advisoryAvoidDomains?: string[];
 }
 

@@ -1,4 +1,15 @@
 tiers:
+  rush:
+    providers: [serper]
+    retrieve_count: 10
+    prefilter_keep: 10
+    fetch_enabled: false
+    fetch_max: 0
+    fetch_chars_per_page: 0
+    rerank_mode: none
+    allow_tool_loop: false
+    tool_loop_max_rounds: 0
+    deadline_ms: 3000
   fast:
     providers: [serper]
     retrieve_count: 15

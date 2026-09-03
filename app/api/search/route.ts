@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const query = typeof body.query === 'string' ? body.query.trim() : '';
     const intent = typeof body.intent === 'string' && body.intent.trim() ? body.intent.trim() : null;
-    const tier = (body.tier === 'right' ? 'right' : 'fast') as 'fast' | 'right';
+    const rawTier = body.tier;
+    const tier = (rawTier === 'rush' ? 'rush' : rawTier === 'right' ? 'right' : 'fast') as 'rush' | 'fast' | 'right';
     const rawModel = body.model_id || body.model_override;
     const modelOverride = typeof rawModel === 'string' && rawModel.trim() && rawModel !== 'auto' ? rawModel.trim() : undefined;
 
@@ -23,11 +24,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Allocate search_id
-    const searchId = uuidv4();
+    // 2. Allocate or accept client-generated search_id
+    const searchId = (typeof body.search_id === 'string' && body.search_id.trim()) ? body.search_id.trim() : uuidv4();
 
-    // 3. Persist initial trace to database immediately so trace endpoint never 404s
-    await store.init();
+    // 3. Register and trigger search job immediately in-memory
+    jobManager.register({
+      id: searchId,
+      query,
+      intent,
+      tier,
+      modelOverride,
+      status: 'pending',
+    });
+
+    jobManager.startIfNotRunning(searchId);
+
+    // 4. Persist initial trace asynchronously (never blocks the client navigation)
     const initialTrace = {
       id: searchId,
       created_at: new Date().toISOString(),
@@ -51,25 +63,12 @@ export async function POST(req: NextRequest) {
         }],
       },
     };
-    try {
-      await store.saveTrace(initialTrace as any);
-    } catch (saveErr) {
-      console.warn('[API /api/search] Initial trace save warning:', saveErr);
-    }
 
-    // 4. Register and trigger job
-    jobManager.register({
-      id: searchId,
-      query,
-      intent,
-      tier,
-      modelOverride,
-      status: 'pending',
+    store.saveTrace(initialTrace as any).catch((saveErr) => {
+      console.warn('[API /api/search] Initial trace background save warning:', saveErr);
     });
 
-    jobManager.startIfNotRunning(searchId);
-
-    // 5. Return search_id immediately to navigate
+    // 5. Return search_id immediately to navigate instantly
     return NextResponse.json({
       search_id: searchId,
       status: 'pending',

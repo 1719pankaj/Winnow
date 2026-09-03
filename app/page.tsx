@@ -17,7 +17,7 @@ export default function HomePage() {
   const [intent, setIntent] = useState('');
   const [sliderValue, setSliderValue] = useState<number>(40);
   const [isAdvanced, setIsAdvanced] = useState(false);
-  const [discreteTier, setDiscreteTier] = useState<'fast' | 'right'>('fast');
+  const [discreteTier, setDiscreteTier] = useState<'rush' | 'fast' | 'right'>('fast');
   const [manualModelOverride, setManualModelOverride] = useState<string>('auto');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -138,13 +138,17 @@ export default function HomePage() {
     return { groq, gemini, nim, openrouter, outdated };
   }, [modelItems, activeModels]);
 
-  // Deep research threshold: >= 75%
-  const isDeep = sliderValue >= 75;
+  // Rush mode at 0%; Deep research threshold at >= 75%
+  const isRush = !isAdvanced && sliderValue === 0;
+  const isDeep = !isAdvanced && sliderValue >= 75;
 
   const dynamicModel = useMemo(() => {
+    if (isRush) {
+      return { id: 'none', label: 'Direct Search (0s AI overhead)', provider: 'direct', intelligenceIndex: 0 };
+    }
     if (!isDeep) {
       if (fastModels.length === 0) return activeModels[0];
-      const ratio = sliderValue / 74;
+      const ratio = Math.max(0, (sliderValue - 1)) / 73;
       const idx = Math.min(fastModels.length - 1, Math.floor(ratio * fastModels.length));
       return fastModels[idx];
     } else {
@@ -153,47 +157,43 @@ export default function HomePage() {
       const idx = Math.min(rightModels.length - 1, Math.floor(ratio * rightModels.length));
       return rightModels[idx];
     }
-  }, [sliderValue, isDeep, fastModels, rightModels, activeModels]);
+  }, [sliderValue, isRush, isDeep, fastModels, rightModels, activeModels]);
 
-  const effectiveTier = isAdvanced ? discreteTier : (isDeep ? 'right' : 'fast');
+  const effectiveTier = isAdvanced ? discreteTier : (isRush ? 'rush' : isDeep ? 'right' : 'fast');
   const effectiveModelId = isAdvanced
-    ? (manualModelOverride !== 'auto' ? manualModelOverride : (discreteTier === 'right' ? 'gemini-3.7-flash-high' : 'groq-gpt-120b'))
+    ? (manualModelOverride !== 'auto' ? manualModelOverride : (discreteTier === 'right' ? 'gemini-3.7-flash-high' : discreteTier === 'rush' ? 'none' : 'groq-gpt-120b'))
     : (manualModelOverride !== 'auto' ? manualModelOverride : (dynamicModel?.id || 'gemini-3.7-flash'));
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!query.trim() || isSubmitting) return;
+    if (!query.trim()) return;
 
-    try {
-      setIsSubmitting(true);
-      setErrorMsg(null);
+    setErrorMsg(null);
 
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          intent: intent.trim() || null,
-          tier: effectiveTier,
-          model_override: effectiveModelId,
-        }),
-      });
+    // Instant 0ms navigation: Generate client searchId and push route immediately
+    const searchId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Search submission failed');
-      }
+    const targetUrl = `/s/${searchId}?q=${encodeURIComponent(query.trim())}${intent.trim() ? `&intent=${encodeURIComponent(intent.trim())}` : ''}&tier=${effectiveTier}${effectiveModelId && effectiveModelId !== 'auto' ? `&m=${encodeURIComponent(effectiveModelId)}` : ''}`;
+    
+    // Navigate immediately without waiting for network
+    router.push(targetUrl);
 
-      const data = await res.json();
-      if (data.search_id) {
-        router.push(`/s/${data.search_id}`);
-      } else {
-        throw new Error('No search_id returned');
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to start search');
-      setIsSubmitting(false);
-    }
+    // Dispatch search orchestrator in parallel
+    fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        search_id: searchId,
+        query: query.trim(),
+        intent: intent.trim() || null,
+        tier: effectiveTier,
+        model_override: effectiveModelId,
+      }),
+    }).catch((err) => {
+      console.error('[Search Submit Background Error]', err);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -363,8 +363,18 @@ export default function HomePage() {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                {/* Discrete Fast / Right Tier Switcher */}
+                {/* Discrete Rush / Fast / Right Tier Switcher */}
                 <div className="tier-segmented" style={{ padding: '2px' }}>
+                  <button
+                    type="button"
+                    className={`tier-tab-btn ${discreteTier === 'rush' ? 'active' : ''}`}
+                    onClick={() => setDiscreteTier('rush')}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                    </svg>
+                    <span>Rush</span>
+                  </button>
                   <button
                     type="button"
                     className={`tier-tab-btn ${discreteTier === 'fast' ? 'active' : ''}`}
@@ -500,10 +510,35 @@ export default function HomePage() {
               </span>
             </label>
 
-            {/* Right Group: Deep Research Pill (Next to Search) + Submit Button */}
+            {/* Right Group: Mode Pill (Next to Search) + Submit Button */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* Rush Mode Pill (When at 0% or discreteTier === 'rush') */}
+              {((!isAdvanced && isRush) || (isAdvanced && discreteTier === 'rush')) && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px',
+                    borderRadius: 'var(--radius-full)',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    background: '#fef3c7',
+                    color: '#92400e',
+                    border: '1px solid #fde68a',
+                    animation: 'fadeIn 0.15s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                  <span>Rush (Instant)</span>
+                </div>
+              )}
+
               {/* Deep Research Pill (Next to Search Button when >= 75%) */}
-              {!isAdvanced && isDeep && (
+              {!isAdvanced && !isRush && isDeep && (
                 <div
                   style={{
                     display: 'inline-flex',

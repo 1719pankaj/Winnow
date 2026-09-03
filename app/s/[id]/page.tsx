@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { RankedResult, Candidate, StageAuditData } from '@/lib/types';
 
 type ActiveViewTab = '0_plan' | '1_retrieve' | '2_prefilter' | '3_fetch' | '4_rerank' | '5_result';
@@ -221,19 +221,26 @@ function RawResponseViewer({ rawText, modelId }: { rawText: string; modelId?: st
 export default function RunPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const searchId = params.id as string;
 
-  // Search Metadata
-  const [query, setQuery] = useState('');
-  const [intent, setIntent] = useState<string | null>(null);
-  const [tier, setTier] = useState<'fast' | 'right'>('fast');
-  const [modelId, setModelId] = useState<string>('');
+  const urlQ = searchParams?.get('q') || '';
+  const urlIntent = searchParams?.get('intent') || '';
+  const rawTier = searchParams?.get('tier');
+  const urlTier = (rawTier === 'rush' ? 'rush' : rawTier === 'right' ? 'right' : 'fast') as 'rush' | 'fast' | 'right';
+  const urlModel = searchParams?.get('m') || '';
+
+  // Search Metadata (hydrated immediately on frame 0)
+  const [query, setQuery] = useState(urlQ);
+  const [intent, setIntent] = useState<string | null>(urlIntent || null);
+  const [tier, setTier] = useState<'rush' | 'fast' | 'right'>(urlTier);
+  const [modelId, setModelId] = useState<string>(urlModel);
   const [interpretation, setInterpretation] = useState<string | null>(null);
 
   // New Search Inputs (Top Searchbar)
-  const [newQuery, setNewQuery] = useState('');
-  const [newIntent, setNewIntent] = useState('');
-  const [newTier, setNewTier] = useState<'fast' | 'right'>('fast');
+  const [newQuery, setNewQuery] = useState(urlQ);
+  const [newIntent, setNewIntent] = useState(urlIntent);
+  const [newTier, setNewTier] = useState<'rush' | 'fast' | 'right'>(urlTier);
   const [showIntentInput, setShowIntentInput] = useState(false);
 
   // Status & Stages
@@ -297,18 +304,26 @@ export default function RunPage() {
     }
   }, [searchId, query, newQuery, intent, newIntent, tier, newTier, modelId, searchStatus, errorMessage, activeTab, results.length, streamedCandidates.length, audit.deliberation_log?.length]);
 
-  const handleNewSearch = async (e?: React.FormEvent) => {
+  const handleNewSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newQuery.trim()) return;
-    try {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: newQuery.trim(), intent: newIntent.trim() || undefined, tier: newTier }),
-      });
-      const data = await res.json();
-      if (data.search_id) router.push(`/s/${data.search_id}`);
-    } catch (err) { console.error(err); }
+
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    router.push(`/s/${newId}?q=${encodeURIComponent(newQuery.trim())}${newIntent.trim() ? `&intent=${encodeURIComponent(newIntent.trim())}` : ''}&tier=${newTier}`);
+
+    fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        search_id: newId,
+        query: newQuery.trim(),
+        intent: newIntent.trim() || undefined,
+        tier: newTier,
+      }),
+    }).catch(console.error);
   };
 
   useEffect(() => {
@@ -620,6 +635,10 @@ export default function RunPage() {
 
               <div className="results-header-mobile-actions mobile-only">
                 <div className="tier-segmented" style={{ padding: '2px' }}>
+                  <button type="button" className={`tier-tab-btn ${newTier === 'rush' ? 'active' : ''}`} onClick={() => setNewTier('rush')} style={{ padding: '3px 7px', fontSize: '11px' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    <span>Rush</span>
+                  </button>
                   <button type="button" className={`tier-tab-btn ${newTier === 'fast' ? 'active' : ''}`} onClick={() => setNewTier('fast')} style={{ padding: '3px 7px', fontSize: '11px' }}>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                     <span>Fast</span>
@@ -648,6 +667,10 @@ export default function RunPage() {
               </button>
 
               <div className="tier-segmented desktop-only" style={{ padding: '2px' }}>
+                <button type="button" className={`tier-tab-btn ${newTier === 'rush' ? 'active' : ''}`} onClick={() => setNewTier('rush')} style={{ padding: '3px 8px', fontSize: '11px' }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                  <span>Rush</span>
+                </button>
                 <button type="button" className={`tier-tab-btn ${newTier === 'fast' ? 'active' : ''}`} onClick={() => setNewTier('fast')} style={{ padding: '3px 8px', fontSize: '11px' }}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                   <span>Fast</span>
@@ -1107,10 +1130,19 @@ export default function RunPage() {
                 <div className="results-meta-bar">
                   <span className="meta-chip">{results.length} results</span>
                   {elapsedMs > 0 && <span className="meta-chip">{(elapsedMs / 1000).toFixed(1)}s</span>}
-                  <span className="meta-chip">Model: {modelId || '...'}</span>
-                  <span className="meta-chip">Tier: {tier.toUpperCase()}</span>
+                  <span className="meta-chip">Model: {tier === 'rush' ? 'Direct Search' : (modelId || '...')}</span>
+                  <span className="meta-chip" style={tier === 'rush' ? { background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' } : {}}>
+                    {tier === 'rush' ? '⚡ RUSH' : `Tier: ${tier.toUpperCase()}`}
+                  </span>
                 </div>
               </div>
+
+              {tier === 'rush' && searchStatus === 'final' && (
+                <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 'var(--radius-lg)', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#854d0e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                  <span><strong>Rush Mode active:</strong> Delivered direct multi-engine search results with 0ms AI inference delay.</span>
+                </div>
+              )}
 
               {searchStatus === 'provisional' && (
                 <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 'var(--radius-lg)', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: '#854d0e', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1208,7 +1240,7 @@ export default function RunPage() {
 
                         <p className="result-snippet-text">{r.snippet}</p>
 
-                        {r.rationale && (
+                        {tier !== 'rush' && r.rationale && (
                           <div className="result-rationale-box">
                             <strong>AI Rationale:</strong> {r.rationale}
                           </div>

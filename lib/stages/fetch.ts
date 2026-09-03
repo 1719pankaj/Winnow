@@ -36,7 +36,7 @@ async function isAllowedByRobots(domain: string, userAgent: string): Promise<boo
 export interface FetchOptions {
   candidates: Candidate[];
   config: FullWinnowConfig;
-  tierName: 'fast' | 'right';
+  tierName: 'rush' | 'fast' | 'right';
   stageBudgetMs?: number;
   onProgress?: (done: number, total: number, ok: number, failed: number) => void;
 }

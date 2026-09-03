@@ -127,7 +127,7 @@ export interface Trace {
   created_at: string;
   query: string;
   intent: string | null;
-  tier: 'fast' | 'right';
+  tier: 'rush' | 'fast' | 'right';
   model_id: string;
   status: 'running' | 'completed' | 'failed' | 'degraded';
   elapsed_ms: number;

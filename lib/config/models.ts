@@ -126,7 +126,7 @@ export const TierConfigSchema = z.object({
   fetch_enabled: z.boolean(),
   fetch_max: z.number(),
   fetch_chars_per_page: z.number().default(6000),
-  rerank_mode: z.enum(['listwise', 'sliding_window', 'tool_loop']).default('listwise'),
+  rerank_mode: z.enum(['listwise', 'sliding_window', 'tool_loop', 'none']).default('listwise'),
   allow_tool_loop: z.boolean().default(false),
   tool_loop_max_rounds: z.number().default(2),
   deadline_ms: z.number(),
@@ -134,6 +134,18 @@ export const TierConfigSchema = z.object({
 
 export const WinnowFileSchema = z.object({
   tiers: z.object({
+    rush: TierConfigSchema.default({
+      providers: ['serper'],
+      retrieve_count: 10,
+      prefilter_keep: 10,
+      fetch_enabled: false,
+      fetch_max: 0,
+      fetch_chars_per_page: 0,
+      rerank_mode: 'none',
+      allow_tool_loop: false,
+      tool_loop_max_rounds: 0,
+      deadline_ms: 3000,
+    }),
     fast: TierConfigSchema,
     right: TierConfigSchema,
   }),

@@ -6,7 +6,7 @@ export interface SearchJob {
   id: string;
   query: string;
   intent?: string | null;
-  tier: 'fast' | 'right';
+  tier: 'rush' | 'fast' | 'right';
   modelOverride?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   promise?: Promise<Trace>;

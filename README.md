@@ -1,12 +1,45 @@
-# WINNOW (Personal Search Engine)
+# 🌾 Winnow — AI Search That Actually Knows What You Want
 
-**Winnow** is an intent-aware personal search engine and metasearch pipeline built in **100% TypeScript / JavaScript** for high performance and zero-ceremony deployment on **Vercel** and local environments.
+**Try it now: [winnow.f01.dpdns.org](https://winnow.f01.dpdns.org)**
+
+## The problem
+
+Type something into Google and you get ten blue links — half of them SEO content farms optimized to rank, not to help. So you do the real work yourself: open five tabs, skim each one, throw most of it away, and hope the answer was in there somewhere.
+
+## What Winnow does instead
+
+You tell Winnow what you're looking for — and, if you want, *why* you're looking for it (your intent). It does the annoying part for you:
+
+1. **Searches everywhere at once.** Your query goes out to a dozen+ search engines in parallel, not just one.
+2. **Reads the results like a person would.** An AI actually looks at what's on each page, not just the title and two-line snippet.
+3. **Throws out what doesn't match.** Spam, SEO bait, and pages that technically contain your keywords but miss the point all get cut.
+4. **Hands you only what's left.** Ranked by what you actually meant, not what ranks well on Google.
+
+**Example:** Search *"best budget laptop"* with the intent *"for video editing, under $800"* and you get laptops that can actually handle video editing under $800 — not the same generic budget-laptop listicle everyone else gets. Change the intent, and the exact same query returns a completely different, better-targeted list.
+
+That's Winnow. AI does the searching. You just read the good stuff.
+
+## One slider, from instant to obsessive
+
+Speed isn't a toggle — it's a dial. Slide it up and Winnow gets smarter, slower, and more thorough, one notch at a time:
+
+- **Low end (fast):** Winnow skims titles and metadata with its quickest models — good for "just give me an answer" lookups in a couple seconds.
+- **Middle:** as you slide up, Winnow hands the job to progressively smarter models that take a bit more time to think.
+- **~75% and up — Deep Research / "Brainiac mode":** Winnow stops skimming. The AI opens and reads the *entire content* of every candidate page before deciding what earns a spot in your results.
+
+Push it all the way and the philosophy is simple: **if it exists on the internet, and there's one page out there serving it, Winnow will find you that page.**
+
+You can also watch results narrow in real time as Winnow works — candidates get pulled in, evaluated, and cut, e.g. `24 → 14 → 10`, so it never feels like a black box.
+
+---
+
+*Everything below this point is for people who want to run, configure, or self-host Winnow.*
 
 ---
 
 ## Key Features
 
-- **Intent-Driven Reranking**: Re-orders candidate search results based on your stated intent (*"the same query with different intent produces completely different results"*).
+- **Intent-Driven Reranking**: Re-orders candidate search results based on your stated intent — the same query with different intent produces completely different results.
 - **Zero Python / 100% JS/TS**: Low memory footprint, fast cold starts, native streaming via Web Streams & Server-Sent Events (SSE).
 - **Config-Driven Modularity**: Add or modify search providers (`Serper`, `Tavily`, `SerpApi`) and inference providers (`Groq`, `Cerebras`, `Google Gemini`, `NVIDIA NIM`, `OpenRouter`) via YAML files without writing TypeScript code.
 - **Dynamic Speed vs Depth Slider**: Seamless volume-bar control transitioning from Ultra-Speed (`Cerebras`, `Groq`) to Deep Research (`Gemini 3.7 Flash High`, `DeepSeek V4 Pro`, `Nemotron 3 Ultra`).

@@ -126,30 +126,116 @@ export default function RunPage() {
     if (!searchId) return;
     let isSubscribed = true;
 
+    const hydrateFromTrace = (trace: any) => {
+      if (!trace) return;
+      setQuery(trace.query); setNewQuery(trace.query);
+      setIntent(trace.intent); setNewIntent(trace.intent || '');
+      setTier(trace.tier); setNewTier(trace.tier);
+      setModelId(trace.model_id); setElapsedMs(trace.elapsed_ms);
+      if (trace.audit) setAudit(trace.audit);
+
+      if (trace.candidates && trace.candidates.length > 0) {
+        setStreamedCandidates((prev) => (prev.length > 0 ? prev : trace.candidates.map((c: any) => ({
+          id: c.id,
+          url: c.url,
+          domain: c.domain,
+          title: c.title,
+          snippet: c.snippet,
+          sources: c.sources || [],
+          fused_score: c.fused_score || 0,
+          published_at: c.published_at || null,
+        }))));
+
+        setPrefilterEvals((prev) => {
+          if (prev.length > 0) return prev;
+          if (trace.audit?.prefilter?.evaluations) {
+            return trace.audit.prefilter.evaluations.map((ev: any) => ({
+              id: ev.id,
+              url: ev.url || '',
+              domain: ev.domain,
+              title: ev.title,
+              snippet: ev.snippet || '',
+              prefilter_score: ev.prefilter_score || 0,
+              fused_score: ev.fused_score || 0,
+              action: ev.action?.includes('Drop') ? 'Drop' : 'Keep',
+              drop_reason: ev.drop_reason || (ev.action?.includes('Drop') ? ev.action : null),
+              dropped_at_stage: ev.dropped_at_stage || null,
+            }));
+          }
+          return trace.candidates.map((c: any) => ({
+            id: c.id,
+            url: c.url,
+            domain: c.domain,
+            title: c.title,
+            snippet: c.snippet,
+            prefilter_score: c.prefilter_score || 0,
+            fused_score: c.fused_score || 0,
+            action: c.dropped_at_stage ? 'Drop' : 'Keep',
+            drop_reason: c.drop_reason || null,
+            dropped_at_stage: c.dropped_at_stage || null,
+          }));
+        });
+
+        setFetchedPages((prev) => {
+          if (prev.length > 0) return prev;
+          const withContent = trace.candidates.filter((c: any) => c.content);
+          return withContent.map((c: any) => ({
+            id: c.id,
+            url: c.url,
+            domain: c.domain,
+            title: c.title,
+            fetch_status: c.content.fetch_status,
+            extraction_method: c.content.extraction_method,
+            char_count: c.content.char_count,
+            truncated: c.content.truncated,
+            text_preview: c.content.text?.slice(0, 2000) || '',
+          }));
+        });
+      }
+
+      if (trace.audit?.rerank) {
+        setRerankInference((prev) => {
+          if (prev) return prev;
+          return {
+            model_id: trace.model_id,
+            parse_ladder_rung: trace.audit.rerank.parse_ladder_rung,
+            system_prompt: trace.audit.rerank.system_prompt,
+            user_prompt: trace.audit.rerank.user_prompt,
+            raw_response: trace.audit.rerank.raw_response,
+            evaluations: trace.audit.rerank.evaluations?.map((ev: any) => ({
+              id: ev.id,
+              domain: ev.domain,
+              title: ev.title || '',
+              url: ev.url || '',
+              final_score: ev.score ?? ev.final_score ?? 0,
+              verdict: ev.verdict || 'keep',
+              rationale: ev.rationale || '',
+            })) || [],
+          };
+        });
+      }
+
+      if (trace.status === 'completed') {
+        setResults(trace.results || []);
+        const dropped = (trace.candidates || []).filter((c: Candidate) => c.dropped_at_stage);
+        setChaff(dropped);
+        setSearchStatus('final');
+        setStageCounts({
+          plan: { status: trace.intent ? 'done' : 'skipped', count: trace.audit?.plan?.queries?.length },
+          retrieve: { status: 'done', count: trace.candidates?.length },
+          prefilter: { status: 'done', count: trace.audit?.prefilter?.kept_count },
+          fetch: { status: trace.tier === 'right' ? 'done' : 'skipped', count: trace.audit?.fetch?.ok },
+          rerank: { status: 'done', count: trace.results?.length },
+          result: { status: 'done', count: trace.results?.length },
+        });
+      }
+    };
+
     fetch(`/api/trace/${searchId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((trace) => {
         if (!isSubscribed || !trace) return;
-        setQuery(trace.query); setNewQuery(trace.query);
-        setIntent(trace.intent); setNewIntent(trace.intent || '');
-        setTier(trace.tier); setNewTier(trace.tier);
-        setModelId(trace.model_id); setElapsedMs(trace.elapsed_ms);
-        if (trace.audit) setAudit(trace.audit);
-
-        if (trace.status === 'completed') {
-          setResults(trace.results || []);
-          const dropped = (trace.candidates || []).filter((c: Candidate) => c.dropped_at_stage);
-          setChaff(dropped);
-          setSearchStatus('final');
-          setStageCounts({
-            plan: { status: trace.intent ? 'done' : 'skipped', count: trace.audit?.plan?.queries?.length },
-            retrieve: { status: 'done', count: trace.candidates?.length },
-            prefilter: { status: 'done', count: trace.audit?.prefilter?.kept_count },
-            fetch: { status: trace.tier === 'right' ? 'done' : 'skipped', count: trace.audit?.fetch?.ok },
-            rerank: { status: 'done', count: trace.results?.length },
-            result: { status: 'done', count: trace.results?.length },
-          });
-        }
+        hydrateFromTrace(trace);
       }).catch(() => {});
 
     const eventSource = new EventSource(`/api/search/${searchId}/events?lastEventId=${lastEventIdRef.current}`);
@@ -172,9 +258,6 @@ export default function RunPage() {
           break;
         case 'stage_started':
           setStageCounts((prev) => ({ ...prev, [data.stage]: { ...prev[data.stage], status: 'active' } }));
-          // Auto-switch to active stage tab
-          const tabMap: Record<string, ActiveViewTab> = { plan: '0_plan', retrieve: '1_retrieve', prefilter: '2_prefilter', fetch: '3_fetch', rerank: '4_rerank' };
-          if (tabMap[data.stage]) setActiveTab(tabMap[data.stage]);
           break;
         case 'stage_skipped':
           setStageCounts((prev) => ({ ...prev, [data.stage]: { ...prev[data.stage], status: 'skipped' } }));
@@ -218,7 +301,6 @@ export default function RunPage() {
           if (data.results) {
             setResults(data.results);
             setSearchStatus('final');
-            setActiveTab('5_result');
             setStageCounts((prev) => ({ ...prev, result: { status: 'done', count: data.results.length } }));
           }
           break;
@@ -228,9 +310,7 @@ export default function RunPage() {
           fetch(`/api/trace/${searchId}`)
             .then((r) => r.json())
             .then((t) => {
-              if (t.audit) setAudit(t.audit);
-              const dropped = (t.candidates || []).filter((c: Candidate) => c.dropped_at_stage);
-              setChaff(dropped);
+              if (t) hydrateFromTrace(t);
             }).catch(() => {});
           eventSource.close();
           break;
@@ -545,9 +625,56 @@ export default function RunPage() {
               </div>
 
               {tier === 'fast' && fetchedPages.length === 0 && (
-                <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 'var(--radius-lg)', padding: '14px 18px', fontSize: '13px', color: '#854d0e' }}>
-                  <strong>Fast Tier:</strong> Full-page fetching is skipped. The reranker evaluates snippets directly from search providers.
-                  Switch to <strong>Right</strong> tier to enable full-page content extraction and deep reading.
+                <div>
+                  <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 'var(--radius-lg)', padding: '14px 18px', fontSize: '13px', color: '#854d0e', marginBottom: '16px' }}>
+                    <strong>Fast Tier:</strong> Full-page scraping is bypassed for low latency (&lt;3s). The candidate snippets below were ingested and passed into the listwise LLM reranker. (Switch to <strong>Right</strong> tier for full DOM readability extraction).
+                  </div>
+
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--foreground)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Ingested Candidate Snippets ({streamedCandidates.length})
+                  </div>
+
+                  {streamedCandidates.map((c) => {
+                    const isExpanded = expandedFetchIds.has(c.id);
+                    return (
+                      <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', marginBottom: '10px', overflow: 'hidden' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedFetchIds((prev) => {
+                              const next = new Set(prev);
+                              next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                              return next;
+                            });
+                          }}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', background: 'var(--secondary)', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                        >
+                          <span style={{ fontSize: '12px', color: 'var(--muted-foreground)' }}>{isExpanded ? '▾' : '▸'}</span>
+                          <Favicon domain={c.domain} />
+                          <span style={{ fontWeight: 600, fontSize: '13px', flex: 1 }}>{c.domain}</span>
+                          <span style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 700, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
+                            SNIPPET
+                          </span>
+                          <span style={{ fontSize: '11px', color: 'var(--muted-foreground)' }}>{c.snippet.length} chars</span>
+                        </button>
+                        {isExpanded && (
+                          <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border)' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--muted-foreground)', padding: '8px 0 6px', fontWeight: 600 }}>
+                              {c.title}
+                            </div>
+                            <pre style={{
+                              background: '#09090b', color: '#d4d4d8', padding: '14px', borderRadius: 'var(--radius-md)',
+                              fontSize: '11px', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                              margin: 0,
+                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                            }}>
+                              {c.snippet}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

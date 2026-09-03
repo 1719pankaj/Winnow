@@ -373,7 +373,15 @@ export class SearchOrchestrator {
         ok: fetchOut.okCount,
         cached: fetchOut.fromCacheCount,
         failed: fetchOut.failedCount,
-        items: [],
+        items: candidates
+          .filter((c) => c.content)
+          .map((c) => ({
+            url: c.url,
+            domain: c.domain,
+            status: c.content!.fetch_status,
+            method: c.content!.extraction_method,
+            chars: c.content!.char_count,
+          })),
       };
 
       await this.logDeliberation('fetch', `Fetch complete: ${fetchOut.okCount} pages read (${fetchOut.fromCacheCount} from cache, ${fetchOut.failedCount} failed/blocked).`);

@@ -739,8 +739,8 @@ export default function RunPage() {
 
         {/* Main Content */}
         <main>
-          {/* Deliberation Log */}
-          {(isLive || (audit.deliberation_log && audit.deliberation_log.length > 0)) && (
+          {/* Deliberation Log (Inspected only in audit tabs, never on the clean results screen) */}
+          {activeTab !== '5_result' && audit.deliberation_log && audit.deliberation_log.length > 0 && (
             <div className="delib-card">
               <div className="delib-card-head">
                 <div style={{ display: 'flex', alignItems: 'center' }}>

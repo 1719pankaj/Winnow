@@ -115,9 +115,9 @@ The **Winnow Rail** visualizes candidate flow in real time across all 6 stages (
 <br />
 </div>
 
-- **Pipeline Deliberation Log:** A high-visibility, real-time terminal display streaming SSE progress events directly from the orchestrator.
-- **Deep Stage Auditing:** Click into any pipeline stage (Plan, Retrieve, Prefilter, Fetch & Read, Rerank) to inspect the exact XML context fed to the model, candidate evaluations, cosine distance scores, and raw model output.
-- **Inspect Chaff:** A collapsible drawer revealing every rejected site and the exact reason it was killed (e.g. *hard blocklist*, *semantic threshold fail*, *model verdict: reject*).
+- **Uncluttered Results Screen:** The primary search results view is completely clean and distraction-free — delivering high-signal ranked links, domain favicons, and AI rationales directly below your query without terminal noise.
+- **Deep Stage Auditing & Deliberation:** Click into any pipeline stage on the left rail (Plan, Retrieve, Prefilter, Fetch & Read, Rerank) to inspect real-time pipeline deliberation logs, exact XML candidate manifests, cosine distance scores, and raw model output.
+- **Inspect Chaff:** A collapsible drawer revealing every rejected site and the exact reason it was pruned (e.g. *hard blocklist*, *semantic threshold fail*, *model verdict: reject*).
 
 ---
 

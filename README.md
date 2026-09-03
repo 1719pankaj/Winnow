@@ -80,24 +80,24 @@ Change the intent, and the exact same query delivers a completely restructured r
 
 ## One Dial: From Reflex to Obsession
 
-Speed on the web is usually treated as a static constraint. In Winnow, speed is a continuous dial:
+Speed on the web is usually treated as a static constraint. In Winnow, speed is an intentional spectrum:
 
 <div align="center">
 <br />
 
 ```
-  [⚡ FAST TIER] ━━━━━━━━━━━━━━━━━━━●━━━━━━━━━ [🧠 DEEP RESEARCH]
-   ~1.2s Latency                     ~73%              ~18.5s Latency
-   High-speed LPUs (Groq/Cerebras)                     Full Page Scraping & Readability
-   Cosine Semantic Prefilter                           Frontier Model Deliberation
+  [⚡ RUSH (0%)] ━━━━━━━━ [🚀 FAST TIER] ━━━━━━━━━━━━━━━━━━━●━━━━━━━━━ [🧠 DEEP RESEARCH]
+   Sub-second (<500ms)      ~1.2s Latency                     ~73%              ~18.5s Latency
+   Zero AI Inference Delay  High-speed LPUs (Groq)                             Full Page Scraping & Readability
+   Direct Multi-Engine RRF  Cosine Semantic Prefilter                           Frontier Model Deliberation
 ```
 
 <br />
 </div>
 
-- **The Fast End (~1–4s):** Powered by ultra-low-latency LPU inference (Groq, Cerebras). Winnow rapidly evaluates titles, snippets, and semantic embeddings to return verified results before you can even reach for another tab.
-- **The Mid Range:** The pipeline balances speed with deeper reasoning, engaging high-parameter models for nuanced technical queries.
-- **75%+ — Deep Research ("Brainiac Mode"):** The AI stops skimming. It fetches the full text of candidate pages, strips the ads, reads thousands of words of technical prose, and cross-examines the candidates.
+- **0% — ⚡ Rush Mode (<500ms):** Pure reflex. When you need facts immediately without AI inference overhead, Winnow queries multi-engine search APIs in parallel and fuses candidates directly using Reciprocal Rank Fusion (RRF). Zero LLM latency, zero fluff, instant Google speed.
+- **1%–74% — 🚀 Fast Tier (~1–3s):** Powered by ultra-low-latency LPU inference (Groq, Cerebras). Winnow rapidly evaluates titles, snippets, and semantic embeddings to return verified, ranked results with AI rationales before you can reach for another tab.
+- **75%+ — 🧠 Deep Research ("Brainiac Mode"):** The AI stops skimming. It fetches the full text of candidate pages, strips the ads, reads thousands of words of technical prose with Mozilla Readability, and cross-examines the candidates in a listwise neural deliberation.
 
 > **The Philosophy:** If an answer exists on the public internet, and there is even one forgotten page or discussion forum serving it, **Winnow will hunt it down, verify it, and hand it to you.**
 
@@ -217,6 +217,7 @@ flowchart TD
   2. *Rung 2:* Markdown fenced codeblock extraction (` ```json `).
   3. *Rung 3:* Regex heuristic recovery for partial or truncated stream responses.
 - Automated fallback routing: if a provider rate-limits (HTTP 429) or fails, the orchestrator immediately falls over to the next provider in the declared chain.
+- *(Note: In **Rush Mode**, Stages 0, 2, 3, and 4 are dynamically bypassed to stream multi-engine candidates directly without LLM delay).*
 
 ### Stage 5: Assembly & Provenance
 - Calculates final rank deltas ($\Delta \text{Rank} = \text{Rank}_{\text{raw}} - \text{Rank}_{\text{final}}$).
@@ -246,16 +247,19 @@ Winnow does not hardcode static models. It features a live benchmark engine at `
 Not every search requires deep cognitive deliberation. Sometimes you just need answers right now.
 
 Winnow provides **Rush Mode** for sub-second, direct multi-engine retrieval:
-- **0ms Instant Navigation:** Clicking Search navigates immediately using client-generated IDs with no network blocking.
+- **0ms Instant Navigation:** Clicking Search navigates immediately using client-generated IDs with zero network blocking.
 - **Bypasses LLM Inference:** Skips Stage 0 planning, Stage 2 semantic embedding, Stage 3 scraping, and Stage 4 LLM reranking.
 - **RRF Reciprocal Rank Fusion:** Multi-engine search APIs are queried in parallel (~200ms) and fused directly into clean, ranked result cards.
 - **Instant Toggle:** Slide the intelligence volume dial to **0%** or click `⚡ Rush` in the discrete tier switcher.
+- **Pristine Result Cards:** Suppresses speculative AI rationale boxes to give you an uncluttered, fast search experience.
 
 <div align="center">
 <br />
 <img src="docs/assets/rush-mode.png" alt="Winnow Rush Mode Results" width="100%" style="border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);" />
 <br />
 </div>
+
+---
 
 ## Built-In 10/10 Issue & Diagnostic Engine
 
@@ -274,6 +278,32 @@ Configure search and inference engines without writing a single line of TypeScri
 - **`config/providers.yaml`**: Search APIs, weights, timeouts, and result limits.
 - **`config/inference.yaml`**: LLM endpoints, temperature, context limits, reasoning settings, and fallback ladders.
 - **`config/winnow.yaml`**: Tier thresholds, semantic prefilter cutoffs, blocklists, cache TTLs, and RRF constants.
+
+```yaml
+# Example excerpt: config/winnow.yaml
+tiers:
+  rush:
+    providers: [serper]
+    retrieve_count: 10
+    fetch_enabled: false
+    rerank_mode: none
+    deadline_ms: 3000
+
+  fast:
+    providers: [serper]
+    retrieve_count: 15
+    fetch_enabled: false
+    rerank_mode: listwise
+    deadline_ms: 10000
+
+  right:
+    providers: [serper, tavily]
+    retrieve_count: 24
+    fetch_enabled: true
+    fetch_max: 10
+    rerank_mode: listwise
+    deadline_ms: 30000
+```
 
 ```yaml
 # Example excerpt: config/inference.yaml

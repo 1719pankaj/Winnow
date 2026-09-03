@@ -46,8 +46,8 @@ export default function HomePage() {
         { id: 'or-gemma-4-31b-free', label: 'Gemma 4 31B (Free)', provider: 'openrouter', intelligenceIndex: 29.7 },
         { id: 'or-nemotron-3-ultra-free', label: 'Nemotron 3 Ultra (Free)', provider: 'openrouter', intelligenceIndex: 38.3 },
         { id: 'or-minimax-m3-free', label: 'MiniMax M3 (Free)', provider: 'openrouter', intelligenceIndex: 45.4 },
+        { id: 'or-deepseek-v4-pro', label: 'DeepSeek V4 Pro', provider: 'openrouter', intelligenceIndex: 45.3 },
         { id: 'or-gemini-3.7-flash', label: 'Google Gemini 3.7 Flash', provider: 'openrouter', intelligenceIndex: 56.0 },
-        { id: 'or-glm-5-3-flash', label: 'Z.ai GLM 5.3 Flash', provider: 'openrouter', intelligenceIndex: 57.5 },
       ];
     }
 
@@ -93,6 +93,50 @@ export default function HomePage() {
       .filter((m) => m.intelligenceIndex >= 38 || m.id.includes('high') || m.id.includes('pro') || m.id.includes('ultra'))
       .sort((a, b) => a.intelligenceIndex - b.intelligenceIndex);
   }, [activeModels]);
+
+  // Grouped models for the Advanced Search dropdown
+  const groupedModelOptions = useMemo(() => {
+    if (!modelItems || modelItems.length === 0) {
+      return {
+        groq: activeModels.filter((m) => m.provider === 'groq'),
+        gemini: activeModels.filter((m) => m.provider === 'gemini'),
+        nim: activeModels.filter((m) => m.provider === 'nim'),
+        openrouter: activeModels.filter((m) => m.provider === 'openrouter'),
+        outdated: [] as ModelBenchmarkItem[],
+      };
+    }
+
+    const groq: (ModelBenchmarkItem | ActiveModelOption)[] = [];
+    const gemini: (ModelBenchmarkItem | ActiveModelOption)[] = [];
+    const nim: (ModelBenchmarkItem | ActiveModelOption)[] = [];
+    const openrouter: (ModelBenchmarkItem | ActiveModelOption)[] = [];
+    const outdated: ModelBenchmarkItem[] = [];
+
+    for (const m of modelItems) {
+      if (m.category === 'outdated') {
+        outdated.push(m);
+      } else if (m.category === 'active' && m.tested_status !== 'fail') {
+        if (m.provider === 'groq') groq.push(m);
+        else if (m.provider === 'gemini') gemini.push(m);
+        else if (m.provider === 'nim') nim.push(m);
+        else if (m.provider === 'openrouter') openrouter.push(m);
+      }
+    }
+
+    const sortFn = (a: any, b: any) => {
+      const scoreA = a.openrouter_match?.intelligence_index ?? a.intelligenceIndex ?? 30;
+      const scoreB = b.openrouter_match?.intelligence_index ?? b.intelligenceIndex ?? 30;
+      return scoreB - scoreA;
+    };
+
+    groq.sort(sortFn);
+    gemini.sort(sortFn);
+    nim.sort(sortFn);
+    openrouter.sort(sortFn);
+    outdated.sort(sortFn);
+
+    return { groq, gemini, nim, openrouter, outdated };
+  }, [modelItems, activeModels]);
 
   // Deep research threshold: >= 75%
   const isDeep = sliderValue >= 75;
@@ -352,26 +396,60 @@ export default function HomePage() {
                   style={{ maxWidth: '280px' }}
                 >
                   <option value="auto">Auto: Default for {discreteTier.toUpperCase()}</option>
-                  <optgroup label="Frontier Intelligence & Production">
-                    <option value="or-glm-5-3-flash">Z.ai GLM 5.3 Flash (57.5)</option>
-                    <option value="or-gemini-3.7-flash">Google Gemini 3.7 Flash (56.0)</option>
-                    <option value="or-minimax-m3-free">MiniMax M3 (Free 45.4)</option>
-                    <option value="or-nemotron-3-ultra-free">Nemotron 3 Ultra (Free 38.3)</option>
-                    <option value="nim-nemotron-3-ultra">NIM Nemotron 3 Ultra 550B (38.3)</option>
-                    <option value="or-deepseek-v4-pro">DeepSeek V4 Pro 0813 (45.3)</option>
-                    <option value="or-gemma-4-31b-free">Gemma 4 31B (Free 29.7)</option>
-                  </optgroup>
-                  <optgroup label="Groq Ultra Speed (LPU)">
-                    <option value="groq-gpt-120b">Groq GPT-OSS 120B (~0.35s)</option>
-                    <option value="groq-qwen-27b">Groq Qwen 3.6 27B (~0.35s)</option>
-                    <option value="groq-gpt-20b">Groq GPT-OSS 20B (~0.3s)</option>
-                  </optgroup>
-                  <optgroup label="Legacy / Outdated">
-                    <option value="gemini-3.1-pro-legacy">Gemini 3.1 Pro (Legacy)</option>
-                    <option value="nim-mistral-nemotron-legacy">Mistral Nemotron (Legacy)</option>
-                    <option value="or-gemma-4-26b-legacy">Gemma 4 26B (26.1)</option>
-                    <option value="or-dots-3-note-legacy">Dots 3 Note (Legacy)</option>
-                  </optgroup>
+
+                  {groupedModelOptions.groq.length > 0 && (
+                    <optgroup label="Groq Ultra Speed (LPU)">
+                      {groupedModelOptions.groq.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.benchmark_hint || m.label || m.id}
+                          {m.tested_latency_ms ? ` (${m.tested_latency_ms}ms)` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {groupedModelOptions.gemini.length > 0 && (
+                    <optgroup label="Google Gemini">
+                      {groupedModelOptions.gemini.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.benchmark_hint || m.label || m.id}
+                          {m.tested_latency_ms ? ` (${m.tested_latency_ms}ms)` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {groupedModelOptions.nim.length > 0 && (
+                    <optgroup label="NVIDIA NIM">
+                      {groupedModelOptions.nim.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.benchmark_hint || m.label || m.id}
+                          {m.tested_latency_ms ? ` (${m.tested_latency_ms}ms)` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {groupedModelOptions.openrouter.length > 0 && (
+                    <optgroup label="OpenRouter Production">
+                      {groupedModelOptions.openrouter.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.benchmark_hint || m.label || m.id}
+                          {m.tested_latency_ms ? ` (${m.tested_latency_ms}ms)` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {groupedModelOptions.outdated.length > 0 && (
+                    <optgroup label="Legacy / Outdated">
+                      {groupedModelOptions.outdated.map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.benchmark_hint || m.label || m.id} (Outdated)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             </div>

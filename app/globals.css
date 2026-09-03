@@ -81,6 +81,96 @@ button, input, select, textarea {
   font-family: var(--font-mono);
 }
 
+/* ==========================================================================
+   GLOBAL CUSTOM SCROLLBARS (Modern, sleek, unobtrusive)
+   ========================================================================== */
+
+/* Modern Standard CSS Scrollbars (Firefox & Chrome 121+) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.4) transparent;
+}
+
+/* WebKit (Chrome, Edge, Safari, Opera) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(161, 161, 170, 0.4);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(161, 161, 170, 0.7);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: rgba(113, 113, 122, 0.9);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Dedicated dark-mode scrollbars for dark containers (deliberation log, XML viewer, code boxes) */
+.delib-card,
+.delib-scroll-box,
+.xml-viewer-container,
+.xml-viewer-body,
+.code-pre-box {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent !important;
+}
+
+.delib-card ::-webkit-scrollbar,
+.delib-scroll-box::-webkit-scrollbar,
+.xml-viewer-container ::-webkit-scrollbar,
+.xml-viewer-body::-webkit-scrollbar,
+.code-pre-box::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.delib-card ::-webkit-scrollbar-track,
+.delib-scroll-box::-webkit-scrollbar-track,
+.xml-viewer-container ::-webkit-scrollbar-track,
+.xml-viewer-body::-webkit-scrollbar-track,
+.code-pre-box::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.delib-card ::-webkit-scrollbar-thumb,
+.delib-scroll-box::-webkit-scrollbar-thumb,
+.xml-viewer-container ::-webkit-scrollbar-thumb,
+.xml-viewer-body::-webkit-scrollbar-thumb,
+.code-pre-box::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25) !important;
+  border-radius: 9999px;
+}
+
+.delib-card ::-webkit-scrollbar-thumb:hover,
+.delib-scroll-box::-webkit-scrollbar-thumb:hover,
+.xml-viewer-container ::-webkit-scrollbar-thumb:hover,
+.xml-viewer-body::-webkit-scrollbar-thumb:hover,
+.code-pre-box::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.45) !important;
+}
+
 /* Base Top Navigation */
 .site-nav {
   position: sticky;

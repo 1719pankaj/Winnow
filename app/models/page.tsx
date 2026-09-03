@@ -465,7 +465,7 @@ export default function ModelsBenchmarkPage() {
             <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px', color: '#0284c7' }}>
               {topScoreModel?.openrouter_match.intelligence_index?.toFixed(1) || '57.5'}{' '}
               <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)' }}>
-                ({topScoreModel?.benchmark_hint || topScoreModel?.id || 'GLM 5.3 Flash'})
+                ({topScoreModel?.benchmark_hint || topScoreModel?.id || 'Top Model'})
               </span>
             </div>
           </div>

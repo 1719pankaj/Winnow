@@ -2,11 +2,48 @@
 
 import { useState } from 'react';
 
+export interface ClientDiagnostics {
+  url: string;
+  pathname: string;
+  searchId: string | null;
+  query?: string;
+  intent?: string;
+  tier?: string;
+  modelId?: string;
+  searchStatus?: string;
+  errorMessage?: string;
+  activeTab?: string;
+  resultsCount?: number;
+  candidatesCount?: number;
+  deliberationLogCount?: number;
+  viewport: string;
+  screen: string;
+  dpr: number;
+  colorDepth: number;
+  orientation: string;
+  network: {
+    online: boolean;
+    effectiveType?: string;
+    downlink?: number;
+    rtt?: number;
+  };
+  recentErrors: {
+    message: string;
+    source?: string;
+    lineno?: number;
+    colno?: number;
+    time: string;
+  }[];
+  timestamp: string;
+}
+
 interface ReportIssueModalProps {
   isOpen: boolean;
   onClose: () => void;
   screenshot: string | null;
-  searchId: string | null;
+  screenshotError: string | null;
+  onRetakeScreenshot: () => void;
+  diagnostics: ClientDiagnostics | null;
   pathname: string;
 }
 
@@ -14,7 +51,9 @@ export function ReportIssueModal({
   isOpen,
   onClose,
   screenshot,
-  searchId,
+  screenshotError,
+  onRetakeScreenshot,
+  diagnostics,
   pathname,
 }: ReportIssueModalProps) {
   const [description, setDescription] = useState('');
@@ -24,6 +63,7 @@ export function ReportIssueModal({
   const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
   const [showDataPreview, setShowDataPreview] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
+  const [isRetryingCapture, setIsRetryingCapture] = useState(false);
 
   if (!isOpen) return null;
 
@@ -33,14 +73,6 @@ export function ReportIssueModal({
     setErrorMessage(null);
     setFallbackUrl(null);
 
-    const clientMeta = {
-      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-      viewport: typeof window !== 'undefined' ? `${window.innerWidth} x ${window.innerHeight}` : '',
-      screen: typeof window !== 'undefined' ? `${window.screen.width} x ${window.screen.height}` : '',
-      dpr: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
-      timestamp: new Date().toISOString(),
-    };
-
     try {
       const res = await fetch('/api/feedback/issue', {
         method: 'POST',
@@ -48,9 +80,11 @@ export function ReportIssueModal({
         body: JSON.stringify({
           description,
           screenshot,
-          search_id: searchId,
+          screenshot_error: screenshotError,
+          search_id: diagnostics?.searchId || null,
+          query: diagnostics?.query || null,
           pathname,
-          client_meta: clientMeta,
+          client_meta: diagnostics,
         }),
       });
 
@@ -67,6 +101,12 @@ export function ReportIssueModal({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleRetake = async () => {
+    setIsRetryingCapture(true);
+    await onRetakeScreenshot();
+    setIsRetryingCapture(false);
   };
 
   const handleResetAndClose = () => {
@@ -90,7 +130,7 @@ export function ReportIssueModal({
                 Report an Issue
               </h2>
               <p style={{ fontSize: '12px', color: 'var(--muted-foreground)', margin: 0 }}>
-                Files a GitHub issue with your current screen & full search pipeline logs
+                Files a detailed issue on GitHub with complete client & pipeline diagnostics
               </p>
             </div>
           </div>
@@ -146,21 +186,21 @@ export function ReportIssueModal({
                 </label>
                 <textarea
                   className="report-textarea"
-                  placeholder="What went wrong or what did you expect to happen? (e.g. 'Rerank model placed irrelevant site #1', 'UI button misaligned on mobile', etc.)"
-                  rows={4}
+                  placeholder="What went wrong or what did you expect to happen? (e.g. 'Stuck connecting', 'Model placed irrelevant site #1', 'UI button misaligned', etc.)"
+                  rows={3}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   disabled={isSubmitting}
                 />
               </div>
 
-              {/* Screenshot Preview */}
-              {screenshot && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--foreground)' }}>
-                      Screen Capture Preview
-                    </span>
+              {/* Screen Capture Status / Preview */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--foreground)' }}>
+                    Screen Capture Preview
+                  </span>
+                  {screenshot && (
                     <button
                       type="button"
                       onClick={() => setIsZoomed(!isZoomed)}
@@ -168,14 +208,17 @@ export function ReportIssueModal({
                     >
                       {isZoomed ? 'Minimize' : 'Enlarge view'}
                     </button>
-                  </div>
+                  )}
+                </div>
+
+                {screenshot ? (
                   <div
                     style={{
                       border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-md)',
                       overflow: 'hidden',
                       background: '#09090b',
-                      maxHeight: isZoomed ? '420px' : '160px',
+                      maxHeight: isZoomed ? '420px' : '150px',
                       transition: 'max-height 0.2s ease',
                       cursor: 'pointer',
                     }}
@@ -187,29 +230,50 @@ export function ReportIssueModal({
                       style={{ width: '100%', height: 'auto', display: 'block', objectFit: 'contain' }}
                     />
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>ℹ️ Visual screen capture unavailable on this browser/device ({screenshotError || 'canvas restricted'}). Full diagnostic data will still be attached.</span>
+                    <button
+                      type="button"
+                      onClick={handleRetake}
+                      disabled={isRetryingCapture}
+                      style={{ background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', marginLeft: '8px', whiteSpace: 'nowrap' }}
+                    >
+                      {isRetryingCapture ? 'Retrying...' : 'Retry Capture'}
+                    </button>
+                  </div>
+                )}
+              </div>
 
-              {/* Diagnostic Inclusions */}
+              {/* Comprehensive Diagnostic Inclusions */}
               <div style={{ background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted-foreground)', marginBottom: '8px' }}>
-                  Diagnostic Data Automatically Attached
+                  Diagnostics Automatically Attached
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', fontSize: '11px' }}>
-                  <span className="report-badge">✓ Captured Screen</span>
-                  {searchId && <span className="report-badge">✓ Pipeline Steps 0–5 Traces</span>}
-                  {searchId && <span className="report-badge">✓ Rerank XML Prompt & Output</span>}
-                  {searchId && <span className="report-badge">✓ Deliberation Logs</span>}
-                  <span className="report-badge">✓ Browser & Screen Info</span>
+                  {diagnostics?.query && <span className="report-badge">🔍 Query: &quot;{diagnostics.query.slice(0, 25)}&quot;</span>}
+                  {diagnostics?.searchStatus && <span className="report-badge">⚡ Status: {diagnostics.searchStatus}</span>}
+                  {diagnostics?.tier && <span className="report-badge">🎯 Tier: {diagnostics.tier.toUpperCase()}</span>}
+                  {screenshot && <span className="report-badge">✓ Screen Image</span>}
+                  <span className="report-badge">🌐 Net: {diagnostics?.network?.effectiveType || 'online'}</span>
+                  <span className="report-badge">📱 {diagnostics?.viewport}</span>
+                  {diagnostics?.recentErrors && diagnostics.recentErrors.length > 0 ? (
+                    <span className="report-badge" style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fecaca', fontWeight: 600 }}>
+                      ⚠️ {diagnostics.recentErrors.length} Client Error{diagnostics.recentErrors.length > 1 ? 's' : ''}
+                    </span>
+                  ) : (
+                    <span className="report-badge">✓ 0 JS Errors</span>
+                  )}
+                  {diagnostics?.searchId && <span className="report-badge">✓ Trace Steps 0–5</span>}
                 </div>
 
-                <div style={{ marginTop: '8px' }}>
+                <div style={{ marginTop: '10px' }}>
                   <button
                     type="button"
                     onClick={() => setShowDataPreview(!showDataPreview)}
                     style={{ background: 'none', border: 'none', fontSize: '11px', color: 'var(--muted-foreground)', cursor: 'pointer', textDecoration: 'underline' }}
                   >
-                    {showDataPreview ? '▾ Hide Attached Parameters' : '▸ Inspect Attached Parameters'}
+                    {showDataPreview ? '▾ Hide Raw Diagnostic Payload' : '▸ Inspect Raw Diagnostic Payload'}
                   </button>
 
                   {showDataPreview && (
@@ -220,21 +284,12 @@ export function ReportIssueModal({
                       borderRadius: 'var(--radius-sm)',
                       fontSize: '11px',
                       marginTop: '8px',
-                      maxHeight: '140px',
+                      maxHeight: '160px',
                       overflowY: 'auto',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}>
-                      {JSON.stringify(
-                        {
-                          search_id: searchId || '(Not on a search results page)',
-                          pathname,
-                          has_screenshot: Boolean(screenshot),
-                          timestamp: new Date().toISOString(),
-                        },
-                        null,
-                        2
-                      )}
+                      {JSON.stringify(diagnostics, null, 2)}
                     </pre>
                   )}
                 </div>

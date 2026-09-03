@@ -8,7 +8,9 @@ export async function POST(req: NextRequest) {
     const {
       description,
       screenshot,
+      screenshot_error,
       search_id,
+      query: clientQuery,
       pathname = '/',
       client_meta = {},
     } = body;
@@ -16,7 +18,7 @@ export async function POST(req: NextRequest) {
     const timestamp = new Date().toISOString();
     const cleanSearchId = search_id?.trim() || null;
 
-    // 1. Fetch trace data if search_id is provided
+    // 1. Fetch trace data from database if search_id is provided
     let trace: any = null;
     if (cleanSearchId) {
       try {
@@ -38,11 +40,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Construct Issue Title
-    const query = trace?.query || (body.query ? String(body.query).trim() : null);
-    const descSummary = description?.trim() ? description.trim().slice(0, 60) : 'Feedback & Pipeline Diagnostics';
-    const issueTitle = query
-      ? `[User Report] Search: "${query}" — ${descSummary}`
+    // 3. Resolve Query & Issue Title
+    const effectiveQuery =
+      trace?.query ||
+      (clientQuery ? String(clientQuery).trim() : null) ||
+      (client_meta?.query ? String(client_meta.query).trim() : null);
+
+    const descSummary = description?.trim()
+      ? description.trim().slice(0, 60)
+      : (client_meta?.searchStatus === 'error'
+          ? (client_meta?.errorMessage ? `Error: ${client_meta.errorMessage.slice(0, 50)}` : 'Search Error')
+          : 'User Feedback & Diagnostics');
+
+    const issueTitle = effectiveQuery
+      ? `[User Report] Search: "${effectiveQuery}" — ${descSummary}`
       : `[User Report] Page ${pathname} — ${descSummary}`;
 
     // 4. Construct Issue Body (Rich GitHub Markdown)
@@ -56,26 +67,48 @@ export async function POST(req: NextRequest) {
       sections.push(`*No written description provided by user.*`);
     }
 
-    // Screenshot
+    // Screenshot or Capture Notice
     if (screenshotUrl) {
       sections.push(`\n### Captured Screen\n![Reported Screenshot](${screenshotUrl})`);
+    } else if (screenshot_error) {
+      sections.push(`\n> ℹ️ **Screen Capture Note:** Visual screen export was omitted by the browser/device (\`${screenshot_error}\`). Full client state and diagnostics are recorded below.`);
     }
 
-    // Search Metadata Table
-    if (trace) {
-      sections.push(`\n### Search Metadata
-| Parameter | Value |
-| :--- | :--- |
-| **Search ID** | \`${trace.id}\` |
-| **Query** | \`${trace.query || 'N/A'}\` |
-| **Intent** | \`${trace.intent || 'None'}\` |
-| **Tier** | \`${(trace.tier || 'fast').toUpperCase()}\` |
-| **Model** | \`${trace.model_id || 'N/A'}\` |
-| **Status** | \`${trace.status}\` |
-| **Elapsed Time** | \`${((trace.elapsed_ms || 0) / 1000).toFixed(2)}s\` |
-| **Timestamp** | \`${trace.created_at || timestamp}\` |
+    // Search & Execution Overview Table
+    const effectiveIntent = trace?.intent || client_meta?.intent || null;
+    const effectiveTier = trace?.tier || client_meta?.tier || 'fast';
+    const effectiveModel = trace?.model_id || client_meta?.modelId || 'auto';
+    const effectiveStatus = trace?.status || client_meta?.searchStatus || 'unknown';
+
+    sections.push(`\n### Search Overview & Execution State
+| Parameter | Value | Source |
+| :--- | :--- | :--- |
+| **Search ID** | \`${cleanSearchId || client_meta?.searchId || 'N/A'}\` | ${cleanSearchId ? 'Client & URL' : 'None'} |
+| **Query** | \`${effectiveQuery || 'N/A'}\` | ${trace?.query ? 'Database Trace' : (effectiveQuery ? 'Client State' : 'None')} |
+| **Intent** | \`${effectiveIntent || 'None'}\` | ${effectiveIntent ? 'Captured' : 'None'} |
+| **Tier** | \`${String(effectiveTier).toUpperCase()}\` | Captured |
+| **Model** | \`${effectiveModel}\` | Captured |
+| **Client Search Status** | \`${client_meta?.searchStatus || 'unknown'}\` | Client UI State |
+| **Backend Trace Status** | \`${trace?.status || 'No DB trace'}\` | ${trace ? 'Database' : 'Not yet saved / unavailable'} |
+| **Elapsed Time** | \`${((trace?.elapsed_ms || 0) / 1000).toFixed(2)}s\` | ${trace ? 'Server Audit' : 'N/A'} |
+| **Timestamp** | \`${timestamp}\` | Report Submission |
 `);
 
+    // Client Error Alert (if any runtime errors captured)
+    if (client_meta?.recentErrors && Array.isArray(client_meta.recentErrors) && client_meta.recentErrors.length > 0) {
+      sections.push(`\n### ⚠️ Client-Side JavaScript Errors (${client_meta.recentErrors.length} captured)
+\`\`\`
+${client_meta.recentErrors.map((e: any, idx: number) => `[Error #${idx + 1}] ${e.time}: ${e.message}\n  Source: ${e.source || 'inline'}:${e.lineno || '?'}:${e.colno || '?'}`).join('\n\n')}
+\`\`\``);
+    }
+
+    // Client-side error message if present
+    if (client_meta?.errorMessage) {
+      sections.push(`\n> **Client-Side Displayed Error:** \`${client_meta.errorMessage}\``);
+    }
+
+    // Database Trace Details (if available)
+    if (trace) {
       // Step 0: Plan
       if (trace.audit?.plan) {
         const plan = trace.audit.plan;
@@ -102,6 +135,7 @@ ${(plan.queries || []).map((q: string) => `  - \`${q}\``).join('\n') || '  - Non
 | # | Domain | Title | Sources | RRF Score |
 | :--- | :--- | :--- | :--- | :--- |
 ${trace.candidates
+  .slice(0, 30)
   .map(
     (c: any, i: number) =>
       `| ${i + 1} | \`${c.domain}\` | [${(c.title || 'Untitled').replace(/\|/g, '-')}](${c.url}) | ${(c.sources || []).map((s: any) => s.provider).join(', ')} | ${c.fused_score?.toFixed(4) || 'N/A'} |`
@@ -201,14 +235,18 @@ ${trace.audit.deliberation_log.map((d: any) => `- \`[${d.stage || 'info'}]\` ${d
     }
 
     // Client & Environment Meta
+    const net = client_meta.network || {};
     sections.push(`\n<details>
 <summary><b>Client & Browser Diagnostics</b></summary>
 
 - **Pathname:** \`${pathname}\`
-- **User Agent:** \`${client_meta.user_agent || 'Unknown'}\`
+- **URL:** \`${client_meta.url || 'N/A'}\`
+- **User Agent:** \`${req.headers.get('user-agent') || 'Unknown'}\`
 - **Viewport:** \`${client_meta.viewport || 'Unknown'}\`
 - **Screen Resolution:** \`${client_meta.screen || 'Unknown'}\`
+- **Orientation:** \`${client_meta.orientation || 'unknown'}\`
 - **Device Pixel Ratio:** \`${client_meta.dpr || 1}\`
+- **Network Status:** \`${net.online ? 'Online' : 'Offline'}\` (Type: \`${net.effectiveType || 'unknown'}\`, Downlink: \`${net.downlink ?? '?'} Mbps\`, RTT: \`${net.rtt ?? '?'} ms\`)
 - **Report Timestamp:** \`${timestamp}\`
 </details>`);
 
@@ -230,7 +268,6 @@ ${trace.audit.deliberation_log.map((d: any) => `- \`[${d.stage || 'info'}]\` ${d
     } catch (githubErr: any) {
       console.error('[Report Issue] GitHub issue creation failed:', githubErr);
 
-      // Return informative response if token missing or API denied
       const repoFullName = process.env.GITHUB_REPO || '1719pankaj/Winnow';
       const fallbackUrl = `https://github.com/${repoFullName}/issues/new?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(issueBody.slice(0, 3000))}`;
 

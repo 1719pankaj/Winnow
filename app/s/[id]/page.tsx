@@ -278,6 +278,25 @@ export default function RunPage() {
     }
   }, [audit.deliberation_log?.length]);
 
+  // Sync state to global window for instant 10/10 issue diagnostic capture
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__winnow_current_search__ = {
+        searchId,
+        query: query || newQuery,
+        intent: intent || newIntent,
+        tier: tier || newTier,
+        modelId,
+        searchStatus,
+        errorMessage,
+        activeTab,
+        resultsCount: results.length,
+        candidatesCount: streamedCandidates.length,
+        deliberationLogCount: audit.deliberation_log?.length || 0,
+      };
+    }
+  }, [searchId, query, newQuery, intent, newIntent, tier, newTier, modelId, searchStatus, errorMessage, activeTab, results.length, streamedCandidates.length, audit.deliberation_log?.length]);
+
   const handleNewSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newQuery.trim()) return;

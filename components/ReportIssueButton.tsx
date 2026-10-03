@@ -190,16 +190,19 @@ export function ReportIssueButton() {
     };
   }, [handleTrigger]);
 
+  const isHomePage = pathname === '/';
+
   return (
     <>
-      {/* Floating Action Button */}
-      <button
-        type="button"
-        onClick={handleTrigger}
-        className="report-floating-btn"
-        title="Report an issue or bug with current screen and logs"
-        disabled={isCapturing}
-      >
+      {/* Floating Action Button (hidden on homepage where top-right header link is used) */}
+      {!isHomePage && (
+        <button
+          type="button"
+          onClick={handleTrigger}
+          className="report-floating-btn"
+          title="Report an issue or bug with current screen and logs"
+          disabled={isCapturing}
+        >
         {isCapturing ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <span className="spinner" style={{ width: '11px', height: '11px', border: '2px solid rgba(0,0,0,0.2)', borderTopColor: 'currentColor' }} />
@@ -214,6 +217,7 @@ export function ReportIssueButton() {
           </span>
         )}
       </button>
+      )}
 
       {/* Modal Dialog */}
       <ReportIssueModal

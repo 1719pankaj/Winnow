@@ -275,6 +275,25 @@ models:
     benchmark_hint: "z-ai/glm-5.2:free (deprecated)"
     cost: free
 
+  # ================= 5. Embedding Models =================
+  - id: or-embedding-lfm-free
+    provider: openrouter
+    model_string: liquid/lfm-2.5-embedding-350m:free
+    role: [embed]
+    capabilities:
+      max_context: 32768
+      dimensions: 1024
+    cost: free
+
+  - id: gemini-embedding-004
+    provider: gemini
+    model_string: text-embedding-004
+    role: [embed]
+    capabilities:
+      max_context: 2048
+      dimensions: 768
+    cost: free
+
 model_policy:
   fast:
     rerank: {order_by: output_speed, min_intelligence: 20}
@@ -295,5 +314,5 @@ model_policy:
     - or-gemma-4-26b-legacy
     - or-dots-3-note-legacy
     - or-free-router
-  embed_model: or-gemini-3.7-flash
+  embed_model: or-embedding-lfm-free
   refresh_metrics_every_hours: 24

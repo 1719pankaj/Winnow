@@ -184,6 +184,7 @@ export default function HomePage() {
     fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
       body: JSON.stringify({
         search_id: searchId,
         query: query.trim(),

@@ -17,25 +17,68 @@ export async function GET(
     return NextResponse.json({ error: 'Search ID is required' }, { status: 400 });
   }
 
-  // Ensure search is triggered / running, restoring from database trace if needed
-  if (!jobManager.get(searchId)) {
-    try {
-      const existingTrace = await store.getTrace(searchId);
+  // Support fallback URL query parameters in case client navigated directly or POST was dropped
+  const urlQ = req.nextUrl.searchParams.get('q')?.trim();
+  const rawTier = req.nextUrl.searchParams.get('tier');
+  const urlTier = (rawTier === 'rush' ? 'rush' : rawTier === 'right' ? 'right' : 'fast') as 'rush' | 'fast' | 'right';
+  const urlIntent = req.nextUrl.searchParams.get('intent')?.trim() || null;
+  const urlModel = req.nextUrl.searchParams.get('m')?.trim() || undefined;
+
+  let existingTrace: any = null;
+  try {
+    existingTrace = await store.getTrace(searchId);
+  } catch (err) {
+    console.warn('[Events Route] Failed to check existing trace:', err);
+  }
+
+  // If already finished, no need to start any job
+  const isFinished = existingTrace && (existingTrace.status === 'completed' || existingTrace.status === 'failed');
+
+  if (!isFinished) {
+    if (!jobManager.get(searchId)) {
       if (existingTrace && existingTrace.status === 'running') {
+        // Trace already exists and is marked running
+        // Check if there are recent events within the last 45s (meaning another worker/process is actively running it)
+        let isActivelyRunning = false;
+        try {
+          const recentEvents = await store.getEvents(searchId);
+          if (recentEvents.length > 0) {
+            const lastEvt = recentEvents[recentEvents.length - 1];
+            const lastTime = new Date(lastEvt.at).getTime();
+            if (Date.now() - lastTime < 45000) {
+              isActivelyRunning = true;
+            }
+          }
+        } catch {}
+
+        if (!isActivelyRunning) {
+          // Stale / abandoned running trace: re-register and resume
+          jobManager.register({
+            id: searchId,
+            query: existingTrace.query,
+            intent: existingTrace.intent,
+            tier: existingTrace.tier,
+            modelOverride: existingTrace.model_id,
+            status: 'pending',
+          });
+          jobManager.startIfNotRunning(searchId);
+        }
+      } else if (urlQ) {
+        // No trace in DB, but URL params supplied by client (e.g. rush mode or direct link)
         jobManager.register({
           id: searchId,
-          query: existingTrace.query,
-          intent: existingTrace.intent,
-          tier: existingTrace.tier,
-          modelOverride: existingTrace.model_id,
-          status: 'running',
+          query: urlQ,
+          intent: urlIntent,
+          tier: urlTier,
+          modelOverride: urlModel,
+          status: 'pending',
         });
+        jobManager.startIfNotRunning(searchId);
       }
-    } catch (err) {
-      console.warn('[Events Route] Failed to check existing trace:', err);
+    } else {
+      jobManager.startIfNotRunning(searchId);
     }
   }
-  jobManager.startIfNotRunning(searchId);
 
   const headerLastId = req.headers.get('last-event-id');
   const urlLastId = req.nextUrl.searchParams.get('lastEventId');

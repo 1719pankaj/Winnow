@@ -122,6 +122,12 @@ export interface StageAuditData {
   deliberation_log?: { timestamp: string; stage: string; message: string; data?: any }[];
 }
 
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface Trace {
   id: string; // UUID
   created_at: string;
@@ -137,6 +143,7 @@ export interface Trace {
   degraded_reasons: { reason: string; detail?: string }[];
   llm_call_count: number;
   cache_hit_count: number;
+  token_usage?: TokenUsage;
   audit?: StageAuditData;
 }
 
@@ -145,6 +152,7 @@ export type ProgressEventType =
   | 'deliberation'
   | 'stage_started'
   | 'stage_skipped'
+  | 'plan_token'
   | 'plan_done'
   | 'provider_returned'
   | 'provider_error'
@@ -159,6 +167,7 @@ export type ProgressEventType =
   | 'fetch_done'
   | 'fetch_content'
   | 'rerank_started'
+  | 'rerank_token'
   | 'rerank_thought'
   | 'rerank_done'
   | 'rerank_inference'

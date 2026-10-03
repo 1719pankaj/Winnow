@@ -1,6 +1,8 @@
-import OpenAI from 'openai';
+import crypto from 'crypto';
 import { Candidate } from '../types';
 import { FullWinnowConfig } from '../config/models';
+import { InferenceAdapter } from '../adapters/inference';
+import { store } from '../store';
 
 export interface PrefilterOptions {
   query: string;
@@ -125,31 +127,69 @@ export async function stagePrefilter(options: PrefilterOptions): Promise<Prefilt
   // 2. Build Embedding Texts
   const queryEmbedText = intent ? `${query}\n${intent.slice(0, 500)}` : query;
   const candidateTexts = activeCandidates.map((c) => `${c.title}\n${c.snippet}`.slice(0, 1000));
+  const allTexts = [queryEmbedText, ...candidateTexts];
 
   let queryVector: number[] | null = null;
   let candidateVectors: number[][] = [];
 
-  // Attempt embeddings via OpenRouter or fallback
+  // Attempt embeddings via configured embed_model policy & InferenceAdapter
   try {
-    const openrouterKey = process.env.OPEN_ROUTER_API_KEY;
-    if (openrouterKey) {
-      const client = new OpenAI({
-        baseURL: 'https://openrouter.ai/api/v1',
-        apiKey: openrouterKey,
-      });
+    const embedModelId = config.inference.model_policy.embed_model || 'or-embedding-lfm-free';
+    const modelConfig =
+      config.inference.models.find((m) => m.id === embedModelId) ||
+      config.inference.models.find((m) => m.role.includes('embed')) ||
+      {
+        id: 'or-embedding-lfm-free',
+        provider: 'openrouter',
+        model_string: 'liquid/lfm-2.5-embedding-350m:free',
+        role: ['embed'] as any,
+        capabilities: { max_context: 32768, dimensions: 1024 },
+        cost: 'free',
+      };
+    const providerConfig =
+      config.inference.inference_providers.find((p) => p.name === modelConfig.provider) ||
+      config.inference.inference_providers.find((p) => p.name === 'openrouter') ||
+      config.inference.inference_providers[0];
 
-      const embedRes = await client.embeddings.create({
-        model: 'liquid/lfm-2.5-embedding-350m:free',
-        input: [queryEmbedText, ...candidateTexts],
-      });
+    if (providerConfig && providerConfig.enabled && providerConfig.api_key) {
+      const adapter = new InferenceAdapter(providerConfig, modelConfig as any);
 
-      if (embedRes.data && embedRes.data.length === candidateTexts.length + 1) {
-        queryVector = embedRes.data[0].embedding;
-        candidateVectors = embedRes.data.slice(1).map((d) => d.embedding);
+      // Check cache for embeddings
+      const vectorResults: (number[] | null)[] = new Array(allTexts.length).fill(null);
+      const uncachedIndices: number[] = [];
+      const uncachedTexts: string[] = [];
+
+      for (let i = 0; i < allTexts.length; i++) {
+        const text = allTexts[i];
+        const hash = crypto.createHash('sha256').update(text).digest('hex').slice(0, 32);
+        const cached = await store.getCachedEmbedding(hash, modelConfig.id).catch(() => null);
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          vectorResults[i] = cached;
+        } else {
+          uncachedIndices.push(i);
+          uncachedTexts.push(text);
+        }
+      }
+
+      // Compute uncached in batch if needed
+      if (uncachedTexts.length > 0) {
+        const computed = await adapter.embed(uncachedTexts);
+        for (let j = 0; j < computed.length; j++) {
+          const originalIdx = uncachedIndices[j];
+          const vec = computed[j];
+          vectorResults[originalIdx] = vec;
+          const hash = crypto.createHash('sha256').update(uncachedTexts[j]).digest('hex').slice(0, 32);
+          store.saveCachedEmbedding(hash, modelConfig.id, vec.length, vec).catch(() => {});
+        }
+      }
+
+      if (vectorResults.every((v) => v !== null && v.length > 0)) {
+        queryVector = vectorResults[0]!;
+        candidateVectors = vectorResults.slice(1) as number[][];
       }
     }
-  } catch (err) {
-    console.warn('[Prefilter Stage] Remote embedding API unavailable, using fast local similarity.');
+  } catch (err: any) {
+    console.warn(`[Prefilter Stage] Remote embedding API unavailable (${err.message}), using fast local similarity.`);
   }
 
   // Fallback if remote embeddings did not execute

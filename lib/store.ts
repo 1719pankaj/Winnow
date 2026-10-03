@@ -58,6 +58,10 @@ class WinnowStore {
           degraded_json TEXT,
           llm_call_count INTEGER,
           cache_hit_count INTEGER,
+          prompt_tokens INTEGER,
+          completion_tokens INTEGER,
+          total_tokens INTEGER,
+          token_usage_json TEXT,
           audit_json TEXT
         );
 
@@ -115,6 +119,10 @@ class WinnowStore {
       // Parallel column migrations
       const alterStatements = [
         `ALTER TABLE traces ADD COLUMN audit_json TEXT`,
+        `ALTER TABLE traces ADD COLUMN prompt_tokens INTEGER`,
+        `ALTER TABLE traces ADD COLUMN completion_tokens INTEGER`,
+        `ALTER TABLE traces ADD COLUMN total_tokens INTEGER`,
+        `ALTER TABLE traces ADD COLUMN token_usage_json TEXT`,
         `ALTER TABLE model_cards ADD COLUMN model_string TEXT`,
         `ALTER TABLE model_cards ADD COLUMN intelligence_index REAL`,
         `ALTER TABLE model_cards ADD COLUMN coding_index REAL`,
@@ -152,8 +160,9 @@ class WinnowStore {
         INSERT INTO traces (
           id, created_at, query, intent, tier, model_id, status, elapsed_ms,
           prompt_version, results_json, candidates_json, degraded_json,
-          llm_call_count, cache_hit_count, audit_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          llm_call_count, cache_hit_count, prompt_tokens, completion_tokens,
+          total_tokens, token_usage_json, audit_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           status=excluded.status,
           elapsed_ms=excluded.elapsed_ms,
@@ -162,6 +171,10 @@ class WinnowStore {
           degraded_json=excluded.degraded_json,
           llm_call_count=excluded.llm_call_count,
           cache_hit_count=excluded.cache_hit_count,
+          prompt_tokens=excluded.prompt_tokens,
+          completion_tokens=excluded.completion_tokens,
+          total_tokens=excluded.total_tokens,
+          token_usage_json=excluded.token_usage_json,
           audit_json=excluded.audit_json
       `,
       args: [
@@ -179,6 +192,10 @@ class WinnowStore {
         JSON.stringify(trace.degraded_reasons),
         trace.llm_call_count,
         trace.cache_hit_count,
+        trace.token_usage?.prompt_tokens ?? null,
+        trace.token_usage?.completion_tokens ?? null,
+        trace.token_usage?.total_tokens ?? null,
+        trace.token_usage ? JSON.stringify(trace.token_usage) : null,
         trace.audit ? JSON.stringify(trace.audit) : null,
       ],
     });
@@ -203,6 +220,19 @@ class WinnowStore {
       }
     }
 
+    let token_usage = undefined;
+    if (row.token_usage_json) {
+      try {
+        token_usage = JSON.parse(row.token_usage_json);
+      } catch {}
+    } else if (row.total_tokens !== null && row.total_tokens !== undefined) {
+      token_usage = {
+        prompt_tokens: Number(row.prompt_tokens) || 0,
+        completion_tokens: Number(row.completion_tokens) || 0,
+        total_tokens: Number(row.total_tokens) || 0,
+      };
+    }
+
     return {
       id: row.id,
       created_at: row.created_at,
@@ -218,26 +248,69 @@ class WinnowStore {
       degraded_reasons: JSON.parse(row.degraded_json || '[]'),
       llm_call_count: row.llm_call_count,
       cache_hit_count: row.cache_hit_count,
+      token_usage,
       audit,
     };
+  }
+
+  // --- Embedding Cache Operations ---
+  async getCachedEmbedding(hash: string, modelId: string): Promise<number[] | null> {
+    await this.init();
+    const rs = await this.client.execute({
+      sql: 'SELECT vector FROM embed_cache WHERE hash = ? AND model_id = ?',
+      args: [hash, modelId],
+    });
+    if (rs.rows.length === 0) return null;
+    const row: any = rs.rows[0];
+    try {
+      if (typeof row.vector === 'string') {
+        return JSON.parse(row.vector);
+      }
+      if (row.vector instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(row.vector))) {
+        return JSON.parse(new TextDecoder().decode(row.vector));
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  async saveCachedEmbedding(hash: string, modelId: string, dims: number, vector: number[]): Promise<void> {
+    await this.init();
+    await this.client.execute({
+      sql: `
+        INSERT INTO embed_cache (hash, model_id, dims, vector, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(hash) DO NOTHING
+      `,
+      args: [hash, modelId, dims, JSON.stringify(vector), new Date().toISOString()],
+    });
   }
 
   // --- Event Stream Operations ---
   async appendEvent(searchId: string, event: ProgressEvent): Promise<void> {
     await this.init();
-    await this.client.execute({
-      sql: `
-        INSERT INTO events (search_id, seq, type, data_json, at)
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      args: [
-        searchId,
-        event.id,
-        event.type,
-        JSON.stringify(event.data),
-        event.at,
-      ],
-    });
+    try {
+      await this.client.execute({
+        sql: `
+          INSERT INTO events (search_id, seq, type, data_json, at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(search_id, seq) DO UPDATE SET
+            type = excluded.type,
+            data_json = excluded.data_json,
+            at = excluded.at
+        `,
+        args: [
+          searchId,
+          event.id,
+          event.type,
+          JSON.stringify(event.data),
+          event.at,
+        ],
+      });
+    } catch (err: any) {
+      console.warn(`[Store] appendEvent warning for searchId ${searchId}, seq ${event.id}:`, err?.message || err);
+    }
   }
 
   async getEvents(searchId: string, sinceSeq: number = 0): Promise<ProgressEvent[]> {

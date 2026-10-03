@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Candidate } from '../types';
+import { Candidate, TokenUsage } from '../types';
 import { FullWinnowConfig } from '../config/models';
 import { InferenceAdapter } from '../adapters/inference';
 
@@ -13,6 +13,8 @@ export interface RerankOptions {
   inferenceAdapter: InferenceAdapter;
   searchId: string;
   freshness?: 'none' | 'week' | 'month' | 'year';
+  timeoutMs?: number;
+  onToken?: (token: string, type?: 'content' | 'thought') => void;
 }
 
 export interface RerankItem {
@@ -31,6 +33,7 @@ export interface RerankOutput {
   user_prompt?: string;
   raw_response?: string;
   parse_ladder_rung?: string;
+  usage?: TokenUsage;
 }
 
 function seededShuffle<T>(array: T[], seedStr: string): T[] {
@@ -212,6 +215,7 @@ export async function stageRerank(options: RerankOptions): Promise<RerankOutput>
   // 3. Execute LLM Call
   let rawResponse = '';
   let isDegraded = false;
+  const timeoutMs = options.timeoutMs || (options.tierName === 'fast' ? 9000 : 20000);
 
   try {
     rawResponse = await inferenceAdapter.complete(
@@ -219,7 +223,7 @@ export async function stageRerank(options: RerankOptions): Promise<RerankOutput>
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
       ],
-      { temperature: 0.1, maxTokens: 2500, responseFormatJson: true }
+      { temperature: 0.1, maxTokens: 2500, responseFormatJson: true, timeoutMs, onToken: options.onToken }
     );
   } catch (err: any) {
     console.warn(`[Rerank Stage] LLM call failed: ${err.message}. Entering degraded mode.`);
@@ -291,5 +295,6 @@ export async function stageRerank(options: RerankOptions): Promise<RerankOutput>
     user_prompt: userMessage,
     raw_response: rawResponse,
     parse_ladder_rung: rungUsed,
+    usage: inferenceAdapter.lastUsage,
   };
 }

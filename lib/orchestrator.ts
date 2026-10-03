@@ -86,12 +86,21 @@ export class SearchOrchestrator {
 
   async run(options: SearchRunOptions): Promise<Trace> {
     await store.init();
+
+    // Ensure monotonic seq if resuming or appending to existing events
+    try {
+      const existingEvents = await store.getEvents(this.searchId);
+      if (existingEvents.length > 0) {
+        this.seq = Math.max(...existingEvents.map((e) => Number(e.id) || 0));
+      }
+    } catch {}
+
     const config = loadConfig();
     const query = options.query.trim();
     const intent = options.intent && options.intent.trim() ? options.intent.trim() : null;
     const tierName = options.tier || 'fast';
     const tierConfig = config.winnow.tiers[tierName] || {
-      providers: ['serper'],
+      providers: ['serper', 'tavily'],
       retrieve_count: 10,
       prefilter_keep: 10,
       fetch_enabled: false,
@@ -134,9 +143,16 @@ export class SearchOrchestrator {
     }
 
     // Resolve Search Adapters
-    const searchAdapters = config.providers
+    let searchAdapters = config.providers
       .filter((p) => p.enabled && tierConfig.providers.includes(p.name))
       .map((p) => new HttpSearchAdapter(p));
+
+    if (searchAdapters.length === 0) {
+      // Fallback: If no provider matched tierConfig, find any enabled search provider
+      searchAdapters = config.providers
+        .filter((p) => p.enabled)
+        .map((p) => new HttpSearchAdapter(p));
+    }
 
     if (searchAdapters.length === 0) {
       throw new Error(`No enabled search providers for tier "${tierName}"`);
@@ -190,7 +206,15 @@ export class SearchOrchestrator {
       for (const candModelId of fallbackCandidateList) {
         try {
           const { adapter: candAdapter, modelId: activeCandId } = this.resolveInferenceAdapter(candModelId, config);
-          planResult = await stagePlan(query, intent, candAdapter, config.winnow.stage_budgets_ms.plan);
+          planResult = await stagePlan(
+            query,
+            intent,
+            candAdapter,
+            config.winnow.stage_budgets_ms.plan,
+            async (token) => {
+              await this.emit('plan_token', { token });
+            }
+          );
 
           this.audit.plan = {
             system_prompt: planResult.system_prompt,
@@ -296,14 +320,18 @@ export class SearchOrchestrator {
 
     if (activeCount === 0) {
       await this.logDeliberation('retrieve', 'Zero candidates retrieved from search providers.');
+      await this.emit('results', { results: [], trace_summary: { elapsed_ms: Date.now() - t0, model_id: modelId, kept_candidates_count: 0 } });
       await this.emit('done', { elapsed_ms: Date.now() - t0, total_llm_calls: 0, cache_hits: 0 });
-      return {
+      const emptyTrace: Trace = {
         ...initialTrace,
         status: 'completed',
         elapsed_ms: Date.now() - t0,
         results: [],
         candidates: [],
+        audit: this.audit,
       };
+      await store.saveTrace(emptyTrace);
+      return emptyTrace;
     }
 
     // ----------------------------------------------------
@@ -460,6 +488,8 @@ export class SearchOrchestrator {
     // ----------------------------------------------------
     // STAGE 4: RERANK (Multi-Model Failover Resilient)
     // ----------------------------------------------------
+    let rerankOut: RerankOutput | undefined;
+
     if (isRush) {
       await this.emit('stage_skipped', { stage: 'rerank', reason: 'rush_mode_direct' });
       await this.logDeliberation('rerank', 'Rush tier: bypassing LLM reranker for sub-second Google-speed delivery.');
@@ -491,7 +521,7 @@ export class SearchOrchestrator {
       });
       await this.logDeliberation('rerank', `Executing listwise LLM evaluation with ${modelId} across ${activeRerankCandidates.length} candidates...`);
 
-      let rerankOut: RerankOutput = {
+      rerankOut = {
         candidates,
         keptCount: activeRerankCandidates.length,
         droppedCount: 0,
@@ -501,6 +531,7 @@ export class SearchOrchestrator {
       for (const candModelId of fallbackCandidateList) {
         try {
           const { adapter: candAdapter, modelId: activeCandId, provider: activeProv } = this.resolveInferenceAdapter(candModelId, config);
+          const rerankTimeout = tierName === 'fast' ? 9000 : 20000;
           
           rerankOut = await stageRerank({
             query,
@@ -511,6 +542,10 @@ export class SearchOrchestrator {
             searchId: this.searchId,
             freshness: planResult.freshness,
             tierName,
+            timeoutMs: rerankTimeout,
+            onToken: async (token, type) => {
+              await this.emit('rerank_token', { token, type: type || 'content', model_id: activeCandId });
+            },
           });
 
           if (!rerankOut.is_degraded) {
@@ -556,6 +591,7 @@ export class SearchOrchestrator {
         system_prompt: rerankOut.system_prompt,
         user_prompt: rerankOut.user_prompt,
         raw_response: rerankOut.raw_response,
+        usage: rerankOut.usage,
         evaluations: candidates
           .filter((c) => !c.dropped_at_stage || c.verdict)
           .map((c) => ({
@@ -599,10 +635,20 @@ export class SearchOrchestrator {
       },
     });
 
+    const totalPromptTokens = (planResult.usage?.prompt_tokens || 0) + (rerankOut?.usage?.prompt_tokens || 0);
+    const totalCompletionTokens = (planResult.usage?.completion_tokens || 0) + (rerankOut?.usage?.completion_tokens || 0);
+    const totalTokens = totalPromptTokens + totalCompletionTokens;
+    const tokenUsage = totalTokens > 0 ? {
+      prompt_tokens: totalPromptTokens,
+      completion_tokens: totalCompletionTokens,
+      total_tokens: totalTokens,
+    } : undefined;
+
     await this.emit('done', {
       elapsed_ms: totalElapsed,
       total_llm_calls: intent ? 2 : 1,
       cache_hits: fromCacheCount,
+      token_usage: tokenUsage,
     });
 
     const finalTrace: Trace = {
@@ -620,6 +666,7 @@ export class SearchOrchestrator {
       degraded_reasons: degradedReasons,
       llm_call_count: intent ? 2 : 1,
       cache_hit_count: fromCacheCount,
+      token_usage: tokenUsage,
       audit: this.audit,
     };
 

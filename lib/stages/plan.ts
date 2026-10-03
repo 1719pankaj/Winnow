@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { InferenceAdapter } from '../adapters/inference';
+import { TokenUsage } from '../types';
 
 export interface PlanOutput {
   queries: string[];
@@ -11,13 +12,15 @@ export interface PlanOutput {
   system_prompt?: string;
   user_prompt?: string;
   raw_response?: string;
+  usage?: TokenUsage;
 }
 
 export async function stagePlan(
   query: string,
   intent: string | null,
   inferenceAdapter: InferenceAdapter | null,
-  timeoutMs = 4000
+  timeoutMs = 4000,
+  onToken?: (token: string) => void
 ): Promise<PlanOutput> {
   // If no intent is provided, skip planning and send query verbatim (Section 6.0)
   if (!intent || !intent.trim() || !inferenceAdapter) {
@@ -36,17 +39,27 @@ export async function stagePlan(
 
   const userContent = `QUERY: ${query}\nINTENT: ${intent}`;
 
+  let isTimedOut = false;
   try {
+    const wrappedOnToken = onToken
+      ? (token: string) => {
+          if (!isTimedOut) onToken(token);
+        }
+      : undefined;
+
     const callPromise = inferenceAdapter.complete(
       [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
       ],
-      { temperature: 0.1, maxTokens: 400, responseFormatJson: true }
+      { temperature: 0.1, maxTokens: 400, responseFormatJson: true, onToken: wrappedOnToken }
     );
 
     const timeoutPromise = new Promise<string>((_, reject) =>
-      setTimeout(() => reject(new Error('Plan timeout exceeded')), timeoutMs)
+      setTimeout(() => {
+        isTimedOut = true;
+        reject(new Error('Plan timeout exceeded'));
+      }, timeoutMs)
     );
 
     const rawJson = await Promise.race([callPromise, timeoutPromise]);
@@ -70,6 +83,7 @@ export async function stagePlan(
       system_prompt: systemPrompt,
       user_prompt: userContent,
       raw_response: rawJson,
+      usage: inferenceAdapter.lastUsage,
     };
   } catch (err: any) {
     console.warn(`[Plan Stage] Degraded plan fallback: ${err.message}`);
@@ -82,6 +96,7 @@ export async function stagePlan(
       system_prompt: systemPrompt,
       user_prompt: userContent,
       raw_response: err.message,
+      usage: inferenceAdapter.lastUsage,
     };
   }
 }

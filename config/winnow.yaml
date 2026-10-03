@@ -1,6 +1,6 @@
 tiers:
   rush:
-    providers: [serper]
+    providers: [serper, tavily]
     retrieve_count: 10
     prefilter_keep: 10
     fetch_enabled: false
@@ -11,7 +11,7 @@ tiers:
     tool_loop_max_rounds: 0
     deadline_ms: 3000
   fast:
-    providers: [serper]
+    providers: [serper, tavily]
     retrieve_count: 15
     prefilter_keep: 10
     fetch_enabled: false

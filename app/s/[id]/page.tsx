@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { RankedResult, Candidate, StageAuditData } from '@/lib/types';
+import { RankedResult, Candidate, StageAuditData, TokenUsage } from '@/lib/types';
 
 type ActiveViewTab = '0_plan' | '1_retrieve' | '2_prefilter' | '3_fetch' | '4_rerank' | '5_result';
 
@@ -33,6 +33,7 @@ interface RerankInference {
   model_id: string; parse_ladder_rung?: string;
   system_prompt?: string; user_prompt?: string; raw_response?: string;
   evaluations: RerankEval[];
+  usage?: TokenUsage;
 }
 
 function Favicon({ domain, size = 16 }: { domain: string; size?: number }) {
@@ -178,7 +179,7 @@ function XmlPromptViewer({ rawText }: { rawText: string }) {
   );
 }
 
-function RawResponseViewer({ rawText, modelId }: { rawText: string; modelId?: string }) {
+function RawResponseViewer({ rawText, modelId, isStreaming }: { rawText: string; modelId?: string; isStreaming?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -196,6 +197,11 @@ function RawResponseViewer({ rawText, modelId }: { rawText: string; modelId?: st
           <span className="xml-badge-tag" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#22c55e', borderColor: 'rgba(34, 197, 94, 0.3)' }}>
             RAW RESPONSE
           </span>
+          {isStreaming && (
+            <span className="xml-badge-tag" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}>
+              ● STREAMING
+            </span>
+          )}
           <span style={{ fontSize: '11px', color: '#a1a1aa', fontFamily: 'var(--font-mono, monospace)' }}>
             {modelId ? `Inference from ${modelId}` : 'Raw LLM Model Output'}
           </span>
@@ -212,6 +218,7 @@ function RawResponseViewer({ rawText, modelId }: { rawText: string; modelId?: st
       <div className="xml-viewer-body" style={{ maxHeight: '420px' }}>
         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', color: '#e4e4e7' }}>
           {rawText}
+          {isStreaming && <span style={{ display: 'inline-block', width: '8px', height: '13px', background: '#38bdf8', marginLeft: '3px', verticalAlign: 'middle', opacity: 0.8 }} />}
         </pre>
       </div>
     </div>
@@ -264,6 +271,8 @@ export default function RunPage() {
   const [prefilterEvals, setPrefilterEvals] = useState<PrefilterEval[]>([]);
   const [fetchedPages, setFetchedPages] = useState<FetchedPage[]>([]);
   const [rerankInference, setRerankInference] = useState<RerankInference | null>(null);
+  const [isRerankStreaming, setIsRerankStreaming] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [expandedFetchIds, setExpandedFetchIds] = useState<Set<string>>(new Set());
 
   // Stage Progress
@@ -338,6 +347,8 @@ export default function RunPage() {
     setPrefilterEvals([]);
     setFetchedPages([]);
     setRerankInference(null);
+    setIsRerankStreaming(false);
+    setTokenUsage(null);
     setAudit({ deliberation_log: [] });
     setSearchStatus('connecting');
     setErrorMessage(null);
@@ -359,6 +370,7 @@ export default function RunPage() {
       if (trace.model_id) setModelId(trace.model_id);
       if (trace.elapsed_ms) setElapsedMs(trace.elapsed_ms);
       if (trace.audit) setAudit(trace.audit);
+      if (trace.token_usage) setTokenUsage(trace.token_usage);
 
       if (trace.status === 'running') {
         setSearchStatus((prev) => (prev === 'final' ? 'final' : 'running'));
@@ -468,12 +480,34 @@ export default function RunPage() {
     fetch(`/api/trace/${searchId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((trace) => {
-        if (!isSubscribed || !trace) return;
-        hydrateFromTrace(trace);
+        if (!isSubscribed) return;
+        if (trace) {
+          hydrateFromTrace(trace);
+        } else if (urlQ) {
+          // Fallback bootstrap if trace doesn't exist yet
+          fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              search_id: searchId,
+              query: urlQ,
+              intent: urlIntent || null,
+              tier: urlTier,
+              model_override: urlModel || undefined,
+            }),
+          }).catch(() => {});
+        }
       }).catch(() => {});
 
-    // 2. Open SSE stream
-    const eventSource = new EventSource(`/api/search/${searchId}/events?lastEventId=${lastEventIdRef.current}`);
+    // 2. Open SSE stream with query params as fallback
+    const sseParams = new URLSearchParams({
+      lastEventId: String(lastEventIdRef.current),
+      ...(urlQ ? { q: urlQ } : {}),
+      ...(urlTier ? { tier: urlTier } : {}),
+      ...(urlIntent ? { intent: urlIntent } : {}),
+      ...(urlModel ? { m: urlModel } : {}),
+    });
+    const eventSource = new EventSource(`/api/search/${searchId}/events?${sseParams.toString()}`);
 
     // Fallback polling interval in case SSE stream is blocked by mobile proxy/network
     const pollInterval = setInterval(() => {
@@ -541,6 +575,17 @@ export default function RunPage() {
         case 'stage_skipped':
           setStageCounts((prev) => ({ ...prev, [data.stage]: { ...prev[data.stage], status: 'skipped' } }));
           break;
+        case 'plan_token':
+          if (data.token) {
+            setAudit((prev) => ({
+              ...prev,
+              plan: {
+                ...(prev.plan || { queries: [], interpretation: '', avoid_domains: [] }),
+                raw_response: ((prev.plan?.raw_response || '') + data.token),
+              },
+            }));
+          }
+          break;
         case 'plan_done':
           setInterpretation(data.interpretation);
           setAudit((prev) => ({ ...prev, plan: { queries: data.queries, interpretation: data.interpretation, avoid_domains: [] } }));
@@ -570,11 +615,33 @@ export default function RunPage() {
         case 'fetch_content':
           if (data.pages) setFetchedPages(data.pages);
           break;
+        case 'rerank_token':
+          setIsRerankStreaming(true);
+          if (data.token) {
+            setRerankInference((prev) => ({
+              model_id: data.model_id || prev?.model_id || modelId,
+              parse_ladder_rung: prev?.parse_ladder_rung,
+              system_prompt: prev?.system_prompt,
+              user_prompt: prev?.user_prompt,
+              evaluations: prev?.evaluations || [],
+              raw_response: (prev?.raw_response || '') + data.token,
+            }));
+          }
+          break;
         case 'rerank_done':
+          setIsRerankStreaming(false);
           setStageCounts((prev) => ({ ...prev, rerank: { status: 'done', count: data.kept } }));
           break;
         case 'rerank_inference':
+          setIsRerankStreaming(false);
           setRerankInference(data);
+          if (data.usage) {
+            setTokenUsage((prev) => prev ? {
+              prompt_tokens: (prev.prompt_tokens || 0) + (data.usage.prompt_tokens || 0),
+              completion_tokens: (prev.completion_tokens || 0) + (data.usage.completion_tokens || 0),
+              total_tokens: (prev.total_tokens || 0) + (data.usage.total_tokens || 0),
+            } : data.usage);
+          }
           break;
         case 'results':
           if (data.results) {
@@ -584,6 +651,8 @@ export default function RunPage() {
           }
           break;
         case 'done':
+          setIsRerankStreaming(false);
+          if (data.token_usage) setTokenUsage(data.token_usage);
           setElapsedMs(data.elapsed_ms || 0);
           setSearchStatus('final');
           fetch(`/api/trace/${searchId}`)
@@ -595,6 +664,7 @@ export default function RunPage() {
           clearInterval(pollInterval);
           break;
         case 'error':
+          setIsRerankStreaming(false);
           setErrorMessage(data.message || 'An error occurred');
           setSearchStatus('error');
           try { eventSource.close(); } catch {}
@@ -605,10 +675,10 @@ export default function RunPage() {
 
     const eventTypes = [
       'search_started', 'deliberation', 'stage_started', 'stage_skipped',
-      'plan_done', 'provider_returned', 'provider_error', 'retrieve_done', 'retrieve_candidates',
+      'plan_token', 'plan_done', 'provider_returned', 'provider_error', 'retrieve_done', 'retrieve_candidates',
       'prefilter_started', 'prefilter_done', 'prefilter_evaluations', 'interim_results',
       'fetch_started', 'fetch_progress', 'fetch_done', 'fetch_content',
-      'rerank_started', 'rerank_done', 'rerank_inference', 'degraded', 'results', 'done', 'error',
+      'rerank_started', 'rerank_token', 'rerank_done', 'rerank_inference', 'degraded', 'results', 'done', 'error',
     ];
     eventTypes.forEach((type) => {
       eventSource.addEventListener(type, (e: MessageEvent) => handleEvent(type, e.data, e.lastEventId));
@@ -1058,6 +1128,16 @@ export default function RunPage() {
                 <div className="audit-stage-title">Stage 4: LLM Reranking & Deliberation</div>
                 <span className="meta-chip">Model: {rerankInference?.model_id || modelId || '...'}</span>
                 {rerankInference?.parse_ladder_rung && <span className="meta-chip">{rerankInference.parse_ladder_rung}</span>}
+                {isRerankStreaming && (
+                  <span className="meta-chip" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}>
+                    ● Streaming live
+                  </span>
+                )}
+                {rerankInference?.usage && (
+                  <span className="meta-chip" style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#c084fc', borderColor: 'rgba(168, 85, 247, 0.3)' }}>
+                    ⚡ {rerankInference.usage.total_tokens.toLocaleString()} tokens ({rerankInference.usage.prompt_tokens.toLocaleString()} in / {rerankInference.usage.completion_tokens.toLocaleString()} out)
+                  </span>
+                )}
               </div>
 
               {/* Per-candidate evaluation table */}
@@ -1108,6 +1188,7 @@ export default function RunPage() {
                   <RawResponseViewer
                     rawText={rerankInference?.raw_response || audit.rerank?.raw_response || ''}
                     modelId={rerankInference?.model_id || modelId}
+                    isStreaming={isRerankStreaming}
                   />
                 </div>
               )}
@@ -1131,6 +1212,15 @@ export default function RunPage() {
                   <span className="meta-chip">{results.length} results</span>
                   {elapsedMs > 0 && <span className="meta-chip">{(elapsedMs / 1000).toFixed(1)}s</span>}
                   <span className="meta-chip">Model: {tier === 'rush' ? 'Direct Search' : (modelId || '...')}</span>
+                  {tokenUsage && tokenUsage.total_tokens > 0 && (
+                    <span
+                      className="meta-chip"
+                      style={{ background: 'rgba(168, 85, 247, 0.1)', color: '#c084fc', borderColor: 'rgba(168, 85, 247, 0.3)' }}
+                      title={`${tokenUsage.prompt_tokens.toLocaleString()} prompt tokens + ${tokenUsage.completion_tokens.toLocaleString()} completion tokens`}
+                    >
+                      ⚡ {tokenUsage.total_tokens.toLocaleString()} tokens
+                    </span>
+                  )}
                   <span className="meta-chip" style={tier === 'rush' ? { background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' } : {}}>
                     {tier === 'rush' ? '⚡ RUSH' : `Tier: ${tier.toUpperCase()}`}
                   </span>

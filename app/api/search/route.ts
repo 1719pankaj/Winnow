@@ -64,9 +64,11 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    store.saveTrace(initialTrace as any).catch((saveErr) => {
-      console.warn('[API /api/search] Initial trace background save warning:', saveErr);
-    });
+    try {
+      await store.saveTrace(initialTrace as any);
+    } catch (saveErr) {
+      console.warn('[API /api/search] Initial trace save warning:', saveErr);
+    }
 
     // 5. Return search_id immediately to navigate instantly
     return NextResponse.json({

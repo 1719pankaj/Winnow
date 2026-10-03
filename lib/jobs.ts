@@ -28,6 +28,9 @@ class SearchJobManager {
   startIfNotRunning(id: string): Promise<Trace> | undefined {
     const job = this.jobs.get(id);
     if (!job) return undefined;
+    if (job.status === 'completed' || job.status === 'failed') {
+      return job.promise;
+    }
 
     if (!job.promise) {
       job.status = 'running';
@@ -66,8 +69,13 @@ class SearchJobManager {
           };
           try {
             await store.saveTrace(errorTrace);
+            let nextSeq = 1;
+            try {
+              const currentEvents = await store.getEvents(id);
+              nextSeq = currentEvents.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0) + 1;
+            } catch {}
             const errEvt: ProgressEvent = {
-              id: Date.now(),
+              id: nextSeq,
               type: 'error',
               data: { message: errorMsg },
               at: new Date().toISOString(),

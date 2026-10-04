@@ -282,10 +282,7 @@ export default function HomePage() {
 
     const targetUrl = `/s/${searchId}?q=${encodeURIComponent(query.trim())}${intent.trim() ? `&intent=${encodeURIComponent(intent.trim())}` : ''}&tier=${effectiveTier}&adv=${isAdvanced ? '1' : '0'}&slider=${sliderValue}${isAdvanced && manualModelOverride && manualModelOverride !== 'auto' ? `&m=${encodeURIComponent(manualModelOverride)}` : ''}`;
 
-    // Navigate immediately without waiting for network
-    router.push(targetUrl);
-
-    // Dispatch search orchestrator in parallel
+    // Dispatch search orchestrator in parallel before triggering client navigation
     fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -300,6 +297,9 @@ export default function HomePage() {
     }).catch((err) => {
       console.error('[Search Submit Background Error]', err);
     });
+
+    // Navigate immediately
+    router.push(targetUrl);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -340,6 +340,7 @@ export default function HomePage() {
         <form onSubmit={handleSubmit} className="search-pill-bar">
           {/* Magnifying Glass Search Icon */}
           <svg
+            className="search-pill-search-icon"
             width="18"
             height="18"
             viewBox="0 0 24 24"

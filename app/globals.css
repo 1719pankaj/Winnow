@@ -368,8 +368,14 @@ button, input, select, textarea {
     gap: 16px;
   }
   .home-logo {
-    font-size: 48px;
-    margin-bottom: 24px;
+    font-size: 38px;
+    margin-bottom: 20px;
+    letter-spacing: -0.05em;
+  }
+  .home-search-wrapper {
+    width: 100%;
+    padding: 0 16px;
+    box-sizing: border-box;
   }
 }
 
@@ -801,25 +807,121 @@ button, input, select, textarea {
 }
 
 @media (max-width: 768px) {
-  .search-pill-bar {
-    border-radius: 28px;
-    padding: 12px 14px;
-    flex-wrap: wrap;
-    gap: 10px;
+  .desktop-only {
+    display: none !important;
   }
+
+  /* Purpose-Built 2-Tier Mobile Search Card */
+  .search-pill-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    border-radius: 22px;
+    padding: 10px 12px;
+    gap: 8px 10px;
+    box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+    width: 100%;
+  }
+
   .search-pill-divider {
     display: none;
   }
+
+  /* Tier 1: Search Icon + Query Input + Mic + Submit on ONE row */
+  .search-pill-search-icon {
+    order: 1;
+    flex-shrink: 0;
+    width: 17px;
+    height: 17px;
+    margin-left: 2px;
+  }
+
   .search-pill-query-input {
-    width: 100%;
-    flex: auto;
+    order: 2;
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    font-size: 15px;
+    padding: 0 4px;
   }
+
+  .search-pill-mic-btn {
+    order: 3;
+    flex-shrink: 0;
+    padding: 3px;
+  }
+
+  .search-pill-submit-btn {
+    order: 4;
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+  }
+
+  /* Tier 2: Intent Capsule spanning 100% full width underneath */
   .search-pill-intent-capsule {
+    order: 5;
     width: 100%;
-    flex: auto;
+    flex: 0 0 100%;
+    margin-top: 2px;
+    padding: 6px 12px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #f1f5f9;
+    box-sizing: border-box;
+    min-width: 0;
   }
+
+  .search-pill-intent-input {
+    font-size: 13px;
+    width: 100%;
+  }
+
+  /* Controls Row on Mobile */
   .home-controls-row {
-    gap: 16px;
+    margin-top: 18px;
+    margin-bottom: 24px;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    position: relative;
+  }
+
+  .home-volume-slider {
+    width: 115px;
+  }
+
+  .home-slider-container {
+    padding: 4px 10px;
+    gap: 8px;
+    position: relative;
+  }
+
+  /* Center the badge directly underneath the slider on mobile so it never falls out of the viewport */
+  .home-slider-badge-slot {
+    position: absolute;
+    left: 50% !important;
+    top: calc(100% + 5px) !important;
+    transform: translateX(-50%) !important;
+    white-space: nowrap;
+    display: flex;
+    justify-content: center;
+  }
+
+  .home-switch-text {
+    font-size: 12.5px;
+  }
+
+  .home-suggestions-row {
+    margin-top: 14px;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .home-suggestion-pill {
+    padding: 5px 12px;
+    font-size: 11.5px;
   }
 }
 
@@ -945,12 +1047,12 @@ button, input, select, textarea {
 /* Responsive Navigation */
 @media (max-width: 768px) {
   .results-header-sticky {
-    padding: 10px 12px;
+    padding: 8px 12px;
   }
   .results-header-top-row {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 8px;
   }
   .results-header-brand-bar {
     display: flex;
@@ -958,11 +1060,42 @@ button, input, select, textarea {
     justify-content: space-between;
     width: 100%;
   }
+  .header-brand-link {
+    font-size: 18px;
+  }
   .results-search-pill-wrapper {
     max-width: 100%;
+    width: 100%;
   }
   .results-header-controls-row {
-    gap: 12px;
+    gap: 10px;
+    margin-top: 6px;
+    margin-bottom: 18px;
+    max-height: 64px;
+    position: relative;
+  }
+  .results-query-title {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+  .results-meta-bar {
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .meta-chip {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  .result-card-clean {
+    padding: 12px 14px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+  }
+  .result-title-link {
+    font-size: 15px;
+  }
+  .result-snippet-text {
+    font-size: 12.5px;
   }
 }
 
@@ -1223,6 +1356,66 @@ button, input, select, textarea {
   height: 1px;
   background: var(--border);
   margin: 10px 0;
+}
+
+@media (max-width: 900px) {
+  .pipeline-rail {
+    position: static;
+    top: auto;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 14px;
+    background: #ffffff;
+    border: 1px solid #e4e4e7;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+    margin-bottom: 12px;
+  }
+  .pipeline-rail::-webkit-scrollbar {
+    display: none;
+  }
+  .pipeline-rail-title {
+    display: none;
+  }
+  .rail-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 4px;
+    flex-shrink: 0;
+  }
+  .rail-divider.result-divider {
+    order: 0;
+  }
+  .rail-stage-item {
+    width: auto;
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    white-space: nowrap;
+    font-size: 12px;
+    margin-bottom: 0;
+    gap: 8px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+  }
+  .rail-stage-item.result-item {
+    order: -1;
+  }
+  .rail-stage-item.selected {
+    background: #18181b;
+    color: #ffffff;
+    border-color: #18181b;
+  }
+  .rail-stage-item.selected .stage-badge-count {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+  }
 }
 
 .delib-card {

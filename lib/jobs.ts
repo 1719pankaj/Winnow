@@ -18,6 +18,13 @@ class SearchJobManager {
   private jobs = new Map<string, SearchJob>();
 
   register(job: SearchJob): void {
+    const existing = this.jobs.get(job.id);
+    if (existing) {
+      // Do not overwrite an existing running or completed job
+      if (existing.status === 'running' || existing.status === 'completed' || existing.promise) {
+        return;
+      }
+    }
     this.jobs.set(job.id, job);
   }
 

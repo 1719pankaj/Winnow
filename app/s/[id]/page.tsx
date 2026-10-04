@@ -343,14 +343,16 @@ export default function RunPage() {
       if (!ticking) {
         window.requestAnimationFrame(() => {
           const currentY = window.scrollY;
+          const collapseThreshold = (typeof window !== 'undefined' && window.innerWidth <= 768) ? 35 : 90;
+          const expandThreshold = (typeof window !== 'undefined' && window.innerWidth <= 768) ? 12 : 20;
 
           // Wide hysteresis:
-          // Collapse only when scrolled down past 90px
-          // Expand only when returning near the top (< 20px)
-          if (!isCurrentlyScrolled && currentY > 90) {
+          // Collapse only when scrolled down past threshold
+          // Expand only when returning near the top
+          if (!isCurrentlyScrolled && currentY > collapseThreshold) {
             isCurrentlyScrolled = true;
             setIsScrolled(true);
-          } else if (isCurrentlyScrolled && currentY < 20) {
+          } else if (isCurrentlyScrolled && currentY < expandThreshold) {
             isCurrentlyScrolled = false;
             setIsScrolled(false);
           }
@@ -836,7 +838,7 @@ export default function RunPage() {
           }
         })
         .catch(() => {});
-    }, 3000);
+    }, 1500);
 
     // Timeout guard: If still connecting after 30 seconds with no data
     const timeoutTimer = setTimeout(() => {
@@ -1025,6 +1027,7 @@ export default function RunPage() {
               <form onSubmit={handleNewSearch} className="search-pill-bar">
                 {/* Search Magnifying Glass Icon */}
                 <svg
+                  className="search-pill-search-icon"
                   width="18"
                   height="18"
                   viewBox="0 0 24 24"
@@ -1457,9 +1460,9 @@ export default function RunPage() {
               );
             })}
 
-            <div className="rail-divider" />
+            <div className="rail-divider result-divider" />
 
-            <button type="button" className={`rail-stage-item ${activeTab === '5_result' ? 'selected' : ''}`} onClick={() => setActiveTab('5_result')} style={{ fontWeight: 600 }}>
+            <button type="button" className={`rail-stage-item result-item ${activeTab === '5_result' ? 'selected' : ''}`} onClick={() => setActiveTab('5_result')} style={{ fontWeight: 600 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
                 <span>5. Ranked Results</span>
@@ -1905,7 +1908,20 @@ export default function RunPage() {
                     onClick={() => {
                       setSearchStatus('connecting');
                       setErrorMessage(null);
-                      window.location.reload();
+                      fetch('/api/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          search_id: searchId,
+                          query: query || urlQ,
+                          intent: intent || urlIntent || null,
+                          tier: tier || urlTier,
+                          model_override: modelId || urlModel || undefined,
+                        }),
+                      }).catch(() => {});
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 400);
                     }}
                     className="results-submit-btn"
                     style={{ padding: '8px 22px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
